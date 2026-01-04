@@ -800,7 +800,7 @@ d2t <- function(x = NULL, n = NULL) {
 
 parallelclass <- function(a) {
   # returns list of parallel classes of matrix a
-  out <- simplematrix(a)
+  out <- simplematrix_fast(a)
   p <- list()
   for (i in 1:length(out$id)) {
     p <- append(p, list(which(out$index == out$id[i])))
@@ -838,6 +838,77 @@ simplematrix <- function(a) {
   ic[ic < 0] <- 0
   out <- list("matrix" = s, "id" = ia, "index" = ic)
   return(out)
+}
+
+simplematrix_fast <- function(a) {
+  n <- nrow(a)
+  if (is.null(n) || n == 0L) {
+    return(list(matrix = a[FALSE, , drop = FALSE], id = integer(0), index = integer(0)))
+  }
+
+  # Make it integer if it is numeric-but-whole (so we can be exact)
+  if (!is.integer(a)) {
+    if (all(is.finite(a)) && all(a == round(a))) {
+      storage.mode(a) <- "integer"
+    } else {
+      stop("simplematrix_fast: to guarantee identical output, a must be integer (or numeric with all whole numbers).")
+    }
+  }
+
+  # Zero-row detection (faster than apply)
+  nnz <- rowSums(a != 0L)
+  nonzero <- which(nnz != 0L)
+
+  ic <- integer(n) # output index; 0 means null row (same as original final output)
+
+  if (length(nonzero) == 0L) {
+    return(list(matrix = a[FALSE, , drop = FALSE], id = integer(0), index = ic))
+  }
+
+  gcd2 <- function(x, y) {
+    # x,y are nonnegative integers
+    while (y != 0L) {
+      tmp <- x %% y
+      x <- y
+      y <- tmp
+    }
+    x
+  }
+
+  row_gcd <- function(r) {
+    z <- abs(r[r != 0L])
+    g <- z[1L]
+    if (length(z) > 1L) {
+      for (k in 2L:length(z)) g <- gcd2(g, z[k])
+    }
+    g
+  }
+
+  keys <- character(length(nonzero))
+  for (k in seq_along(nonzero)) {
+    i <- nonzero[k]
+    r <- a[i, ]
+
+    g <- row_gcd(r)
+    v <- r / g
+
+    # fix sign: make first nonzero positive
+    first <- which(v != 0L)[1L]
+    if (v[first] < 0L) v <- -v
+
+    keys[k] <- paste(v, collapse = ",")
+  }
+
+  # representatives are first occurrences (matching original behavior)
+  first_of_key <- !duplicated(keys)
+  ia <- nonzero[first_of_key]
+
+  # map every nonzero row to its representative's ORIGINAL row index
+  rep_for_key <- ia[match(keys, keys[first_of_key])]
+  ic[nonzero] <- rep_for_key
+
+  s <- a[ia, , drop = FALSE]
+  list(matrix = s, id = ia, index = ic)
 }
 
 condense <- function(a) {
