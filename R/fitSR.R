@@ -1,6 +1,6 @@
 # Original script by John Dunn, retrieved from https://osf.io/n62y4/files/osfstorage
 
-fitSR <- function(data = NULL, design = NULL, nstep = 20, init = NULL, input = NULL) {
+fitSR <- function(data = NULL, design = NULL, nstep = 20, init = NULL, input = NULL, solveLP_fun = solveLP_col, simplematrix_fun = simplematrix_fast) {
   # takes as input a nr x nc matrix of counts
   # columns correspond to rating categories with confidence that the item is old decreasing from left to right
   # rows correspond to conditions
@@ -43,6 +43,8 @@ fitSR <- function(data = NULL, design = NULL, nstep = 20, init = NULL, input = N
     weights = weights,
     input = input,
     nstep = nstep,
+    solveLP_fun = solveLP_fun,
+    simplematrix_fun = simplematrix_fun
   )
 
   if (length(y) == 1) y <- y[[1]]
@@ -305,7 +307,7 @@ factdesign <- function(levels, nrep = 0) {
   return(A)
 }
 
-mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, parallel = NULL, init = NULL, tol = NULL, input = NULL) {
+mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, parallel = NULL, init = NULL, tol = NULL, input = NULL, solveLP_fun = solveLP, simplematrix_fun = simplematrix_fast) {
   # solves the monotonic Linear Regression problem
   # data is a n-vector of observations
   # weights is an n x n matrix of weights (default=identity matrix)
@@ -424,7 +426,7 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
     dac <- mat2diff(cond$matrix, 1) # difference matrix of condensation of a
     dc <- mat2diff(diag(nrow(cond$matrix))) # difference matrix of order nrow(ac)
     if (is.null(parallel)) {
-      parallel <- parallelclass(dac)
+      parallel <- parallelclass(dac, simplematrix_fun)
     } # calculate parallelism classes of dac
     rankdc <- rep(0, length(parallel))
     for (i in 1:length(parallel)) {
@@ -505,7 +507,7 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
             if (all(xc == sign(q))) { # xc passes projection test
               tope <- 1
             } else {
-              if (is.null(solveLP(xc, dac))) {
+              if (is.null(solveLP_fun(xc, dac))) {
                 tope <- 0
               } else {
                 tope <- 1
@@ -798,9 +800,9 @@ d2t <- function(x = NULL, n = NULL) {
   return(y)
 }
 
-parallelclass <- function(a) {
+parallelclass <- function(a, simplematrix_fun = simplematrix_fast) {
   # returns list of parallel classes of matrix a
-  out <- simplematrix_fast(a)
+  out <- simplematrix_fun(a)
   p <- list()
   for (i in 1:length(out$id)) {
     p <- append(p, list(which(out$index == out$id[i])))
@@ -972,21 +974,92 @@ solveLP <- function(y = NULL, a = NULL) {
   # determines if sign(y) is a covector of matrix a
   # solves LP problem
   # if no solution then returns NULL
-
   n <- nrow(a)
   m <- ncol(a)
   lprec <- make.lp(n, m)
   set.objfn(lprec, rep(0, m))
   C <- a
   for (i in 1:nrow(C)) {
+    vec = C[i, ]
     if (y[i] > 0) {
-      add.constraint(lprec, C[i, ], ">=", 1)
+      add.constraint(lprec, vec, ">=", 1)
     } else if (y[i] < 0) {
-      add.constraint(lprec, C[i, ], "<=", -1)
+      add.constraint(lprec, vec, "<=", -1)
     } else {
-      add.constraint(lprec, C[i, ], "=", 0)
+      add.constraint(lprec, vec, "=", 0)
     }
   }
+  set.bounds(lprec, lower = rep(-Inf, m), upper = rep(Inf, m), columns = 1:m)
+  solve(lprec)
+  exitflag <- 1
+  if (get.solutioncount(lprec) == 0) {
+    exitflag <- 0
+  }
+  if (exitflag == 1) {
+    x <- get.variables(lprec)
+    saveRDS(list(y=y, a=a), "data/lp_benchmark_input_3s.rds")
+  } else {
+    x <- NULL
+  }
+  return(x)
+}
+
+solveLP_col <- function(y = NULL, a = NULL) {
+  # determines if sign(y) is a covector of matrix a
+  # solves LP problem
+  # if no solution then returns NULL
+
+  n <- nrow(a)
+  m <- ncol(a)
+  sign_y <- sign(y)
+  lprec <- make.lp(n, m)
+
+  for (i in seq.int(m)) {
+    set.column(lprec, i, a[,i])
+  }
+
+  set.objfn(lprec, rep(0, m))
+  constraint_types <- c("<=", "=", ">=")[sign_y + 2L]
+  set.constr.type(lprec, constraint_types)
+  set.rhs(lprec, sign_y)
+
+
+  set.bounds(lprec, lower = rep(-Inf, m), upper = rep(Inf, m), columns = 1:m)
+  solve(lprec)
+  exitflag <- 1
+  if (get.solutioncount(lprec) == 0) {
+    exitflag <- 0
+  }
+  if (exitflag == 1) {
+    x <- get.variables(lprec)
+  } else {
+    x <- NULL
+  }
+  return(x)
+}
+
+solveLP_col_ind <- function(y = NULL, a = NULL) {
+  # determines if sign(y) is a covector of matrix a
+  # solves LP problem
+  # if no solution then returns NULL
+
+  n <- nrow(a)
+  m <- ncol(a)
+  sign_y <- sign(y)
+  lprec <- make.lp(n, m)
+
+  for (i in seq.int(m)) {
+    x = a[,i]
+    ind = which(x != 0)
+    set.column(lprec, i, x[ind], ind)
+  }
+
+  set.objfn(lprec, rep(0, m))
+  constraint_types <- c("<=", "=", ">=")[sign_y + 2L]
+  set.constr.type(lprec, constraint_types)
+  set.rhs(lprec, sign_y)
+
+
   set.bounds(lprec, lower = rep(-Inf, m), upper = rep(Inf, m), columns = 1:m)
   solve(lprec)
   exitflag <- 1
