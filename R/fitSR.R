@@ -19,9 +19,10 @@ fitSR <- function(data = NULL, design = NULL, nstep = 20, init = NULL, input = N
   yy <- makedatavector(y)
   yy <- 1 - yy
 
+  weights <- NULL
+  mat <- design
+
   if (is.null(input)) {
-    if (is.null(design)) {
-      mat <- NULL
       for (i in seq_along(y)) {
         nr <- nrow(y[[i]])
         nc <- ncol(y[[i]]) - 1
@@ -32,25 +33,17 @@ fitSR <- function(data = NULL, design = NULL, nstep = 20, init = NULL, input = N
           mat <- adiag(mat, a)
         }
       }
-    } else {
-      mat <- design
-    }
 
-    w <- makeweights(y)
+    weights <- makeweights(y)
+  } 
 
-    out <- mLR(
-      data = yy,
-      design = mat,
-      weights = w,
-      nstep = nstep,
-    )
-  } else {
-    out <- mLR(
-      data = yy,
-      input = input,
-      nstep = nstep,
-    )
-  }
+  out <- mLR(
+    data = yy,
+    design = mat,
+    weights = weights,
+    input = input,
+    nstep = nstep,
+  )
 
   if (length(y) == 1) y <- y[[1]]
   out$y <- y
