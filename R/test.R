@@ -10,8 +10,8 @@ y2 <- readexp(2, "data/dunn2025/")
 y3 <- readexp(3, "data/dunn2025/")
 
 
-fitSR(list(y1$total)) |> str(1)
-# fitSR(list(y1$total, y2$total, y3$total))
+# fitSR(list(y1$total)) |> str(1)
+fitSR(list(y1$total, y2$total, y3$total))
 
 # # times with one dataset
 # # 3.473 sec elapsed

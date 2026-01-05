@@ -450,7 +450,6 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
 
     # start search
     while (length(open) > 0 && itr < nstep && minfit > 0) {
-      # browser()
       itr <- itr + 1 # increment step count
       tc <- sign(mat2diff(open[[1]]$perm))
       f <- open[[1]]$fit
@@ -503,6 +502,7 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
         open <- open[order(f)] # re-order open by fit
       }
     }
+    # browser()
   }
 
   # arrange output

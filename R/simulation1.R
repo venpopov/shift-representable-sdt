@@ -13,7 +13,8 @@ y2 <- readexp(2, "data/dunn2025/") # acquire response data from Experiment 2
 y3 <- readexp(3, "data/dunn2025/") # acquire response data from Experiment 3
 
 
-out1 <- fitSR(list(y1$total, y2$total, y3$total), nstep = 1000)
+out <- fitSR(list(y1$total, y2$total, y3$total), nstep = 1000)
+out2 <- fitSR(list(y1$total, y2$total, y3$total), nstep = 1000, input = out)
 
 # plot changes in fits and minfits
 plot(1:out$nstep, out$fits,
