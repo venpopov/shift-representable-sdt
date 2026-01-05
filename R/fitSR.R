@@ -7,30 +7,23 @@ fitSR <- function(data = NULL, design = NULL, nstep = 20, init = NULL, input = N
   # although there are options to change them, usually the call will be:
   # out <- fitSR (y), where y is the data matrix or a list of matrices in which case a joint analysis is performed
 
-  if (require("magic") == F) {
-    install.packages("magic")
-    library(magic)
-  }
+  weights <- NULL
   y <- data
   if (!is.list(y)) {
     y <- list(y)
   }
 
-  yy <- makedatavector(y)
-  yy <- 1 - yy
-
-  weights <- NULL
-  mat <- design
+  yy <- 1 - makedatavector(y)
 
   if (is.null(input)) {
       for (i in seq_along(y)) {
         nr <- nrow(y[[i]])
         nc <- ncol(y[[i]]) - 1
         a <- sdtdesign(c(nr, nc))
-        if (is.null(mat)) {
-          mat <- a
+        if (is.null(design)) {
+          design <- a
         } else {
-          mat <- adiag(mat, a)
+          design <- magic::adiag(design, a)
         }
       }
 
@@ -39,7 +32,7 @@ fitSR <- function(data = NULL, design = NULL, nstep = 20, init = NULL, input = N
 
   out <- mLR(
     data = yy,
-    design = mat,
+    design = design,
     weights = weights,
     input = input,
     nstep = nstep,
@@ -53,7 +46,7 @@ fitSR <- function(data = NULL, design = NULL, nstep = 20, init = NULL, input = N
   out$g2 <- getgsq(out$py, out$y)
   out$g2[out$g2 < 0] <- 0
 
-  return(out)
+  out
 }
 
 makedatavector <- function(y) {
@@ -307,7 +300,8 @@ factdesign <- function(levels, nrep = 0) {
   return(A)
 }
 
-mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, parallel = NULL, init = NULL, tol = NULL, input = NULL, solveLP_fun = solveLP, simplematrix_fun = simplematrix_fast) {
+mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, parallel = NULL, init = NULL, 
+  tol = NULL, input = NULL, solveLP_fun = solveLP_col, simplematrix_fun = simplematrix_fast) {
   # solves the monotonic Linear Regression problem
   # data is a n-vector of observations
   # weights is an n x n matrix of weights (default=identity matrix)
@@ -321,27 +315,6 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
   # returns: optimal fit, fitted values (predictions), and best-fitting permutation,
   # and vectors of fits and best fits for each step
   # checked against matlab code on 23 Oct 2025
-  # load packages if required
-  if (require("lpSolveAPI") == F) {
-    install.packages("lpSolveAPI")
-    library(lpSolveAPI)
-  }
-  if (require("nloptr") == F) {
-    install.packages("nloptr")
-    library(nloptr)
-  }
-  if (require("MASS") == F) {
-    install.packages("MASS")
-    library(MASS)
-  }
-  if (require("tictoc") == F) {
-    install.packages("tictoc")
-    library(tictoc)
-  }
-  if (require("quadprog") == F) {
-    install.packages("quadprog")
-    library(quadprog)
-  }
 
   if (is.null(nstep)) {
     nstep <- Inf
@@ -383,7 +356,7 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
   }
   # initialize some matrices etc.
   itr <- 0 # step counter
-  tic() # start timer
+  tictoc::tic() # start timer
   fits <- c()
   minfits <- c() # initialize arrays to contain current fit and best fit on each step
   if (is.vector(a)) {
@@ -415,7 +388,7 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
       soltope <- -t
       pred <- mr2$pred
     }
-  } else if (!is.null(solveLP(dy, da))) {
+  } else if (!is.null(solveLP_fun(dy, da))) {
     type <- "Data conform to permitted permutation"
     soltope <- sign(dy)
     minfit <- 0
@@ -432,7 +405,7 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
     for (i in 1:length(parallel)) {
       rankdc[i] <- qr(dc[parallel[[i]], ])$rank
     } # store dc sub-matrix ranks
-    u <- a %*% ginv(t(a) %*% w %*% a) %*% t(a) %*% w # calculate useful matrix
+    u <- a %*% MASS::ginv(t(a) %*% w %*% a) %*% t(a) %*% w # calculate useful matrix
 
     if (is.null(init)) { # calculate initial tope if required
       yp <- u %*% y # weighted projection of y onto col(a)
@@ -443,7 +416,7 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
       init <- as.vector(sign(dinit))
     }
     # procedure to repair initial vector if not tope or not feasible
-    if (any(init == 0) || is.null(solveLP(init, dac))) {
+    if (any(init == 0) || is.null(solveLP_fun(init, dac))) {
       md <- mean(abs(dyp))
       my <- y + .1 * runif(length(y), -md, md) # add some random jitter to y
       yp <- u %*% my # weighted projection of my onto col(a)
@@ -451,7 +424,7 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
       init <- as.vector(sign(dyp))
     }
     # warn if initial tope is not in permitted set
-    if (is.null(solveLP(init, dac))) {
+    if (is.null(solveLP_fun(init, dac))) {
       cat("Warning: Initial tope not in permitted set")
     }
 
@@ -471,12 +444,13 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
       minfit <- input$fit
       soltope <- sign(mat2diff(input$permutation))
     }
-    H <- dac %*% ginv(t(dac) %*% dac) %*% t(dac) # pre-calculate projection matrix on to col(dac)
+    H <- dac %*% MASS::ginv(t(dac) %*% dac) %*% t(dac) # pre-calculate projection matrix on to col(dac)
     n <- nrow(cond$matrix)
     nc <- n * (n + 1) * (2 * n + 1) / 6 # pre-calculate sum of permutation elements squared
 
     # start search
     while (length(open) > 0 && itr < nstep && minfit > 0) {
+      # browser()
       itr <- itr + 1 # increment step count
       tc <- sign(mat2diff(open[[1]]$perm))
       f <- open[[1]]$fit
@@ -539,7 +513,7 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
   }
   # calculate regression weights
   if (qr(da)$rank > 0) {
-    x <- solveLP(soltope, da)
+    x <- solveLP_fun(soltope, da)
   } else {
     x <- rep(0, ncol(a))
   }
@@ -559,7 +533,7 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
   k <- which(minfits == minfit)
   mitr <- k[1] # step counter of minimum fit
   permutation <- tope2perm(soltope)
-  dur <- toc()
+  dur <- tictoc::toc()
   output <- list(
     "fit" = minfit, "data" = y, "predicted" = pred, "permutation" = permutation, "x" = x,
     "z" = xp, "nstep" = itr, "mstep" = mitr, "fits" = fits, "minfits" = minfits, "design" = a, "weights" = w,
@@ -976,28 +950,32 @@ solveLP <- function(y = NULL, a = NULL) {
   # if no solution then returns NULL
   n <- nrow(a)
   m <- ncol(a)
-  lprec <- make.lp(n, m)
-  set.objfn(lprec, rep(0, m))
+  lprec <- lpSolveAPI::make.lp(n, m)
+  lpSolveAPI::set.objfn(lprec, rep(0, m))
   C <- a
   for (i in 1:nrow(C)) {
     vec = C[i, ]
     if (y[i] > 0) {
-      add.constraint(lprec, vec, ">=", 1)
+      lpSolveAPI::add.constraint(lprec, vec, ">=", 1)
     } else if (y[i] < 0) {
-      add.constraint(lprec, vec, "<=", -1)
+      lpSolveAPI::add.constraint(lprec, vec, "<=", -1)
     } else {
-      add.constraint(lprec, vec, "=", 0)
+      lpSolveAPI::add.constraint(lprec, vec, "=", 0)
     }
   }
-  set.bounds(lprec, lower = rep(-Inf, m), upper = rep(Inf, m), columns = 1:m)
+  lpSolveAPI::set.bounds(
+    lprec,
+    lower = rep(-Inf, m),
+    upper = rep(Inf, m),
+    columns = 1:m
+  )
   solve(lprec)
   exitflag <- 1
-  if (get.solutioncount(lprec) == 0) {
+  if (lpSolveAPI::get.solutioncount(lprec) == 0) {
     exitflag <- 0
   }
   if (exitflag == 1) {
-    x <- get.variables(lprec)
-    saveRDS(list(y=y, a=a), "data/lp_benchmark_input_3s.rds")
+    x <- lpSolveAPI::get.variables(lprec)
   } else {
     x <- NULL
   }
@@ -1012,62 +990,31 @@ solveLP_col <- function(y = NULL, a = NULL) {
   n <- nrow(a)
   m <- ncol(a)
   sign_y <- sign(y)
-  lprec <- make.lp(n, m)
+  lprec <- lpSolveAPI::make.lp(n, m)
 
   for (i in seq.int(m)) {
-    set.column(lprec, i, a[,i])
+    lpSolveAPI::set.column(lprec, i, a[, i])
   }
 
-  set.objfn(lprec, rep(0, m))
+  lpSolveAPI::set.objfn(lprec, rep(0, m))
   constraint_types <- c("<=", "=", ">=")[sign_y + 2L]
-  set.constr.type(lprec, constraint_types)
-  set.rhs(lprec, sign_y)
+  lpSolveAPI::set.constr.type(lprec, constraint_types)
+  lpSolveAPI::set.rhs(lprec, sign_y)
 
 
-  set.bounds(lprec, lower = rep(-Inf, m), upper = rep(Inf, m), columns = 1:m)
+  lpSolveAPI::set.bounds(
+    lprec,
+    lower = rep(-Inf, m),
+    upper = rep(Inf, m),
+    columns = 1:m
+  )
   solve(lprec)
   exitflag <- 1
-  if (get.solutioncount(lprec) == 0) {
+  if (lpSolveAPI::get.solutioncount(lprec) == 0) {
     exitflag <- 0
   }
   if (exitflag == 1) {
-    x <- get.variables(lprec)
-  } else {
-    x <- NULL
-  }
-  return(x)
-}
-
-solveLP_col_ind <- function(y = NULL, a = NULL) {
-  # determines if sign(y) is a covector of matrix a
-  # solves LP problem
-  # if no solution then returns NULL
-
-  n <- nrow(a)
-  m <- ncol(a)
-  sign_y <- sign(y)
-  lprec <- make.lp(n, m)
-
-  for (i in seq.int(m)) {
-    x = a[,i]
-    ind = which(x != 0)
-    set.column(lprec, i, x[ind], ind)
-  }
-
-  set.objfn(lprec, rep(0, m))
-  constraint_types <- c("<=", "=", ">=")[sign_y + 2L]
-  set.constr.type(lprec, constraint_types)
-  set.rhs(lprec, sign_y)
-
-
-  set.bounds(lprec, lower = rep(-Inf, m), upper = rep(Inf, m), columns = 1:m)
-  solve(lprec)
-  exitflag <- 1
-  if (get.solutioncount(lprec) == 0) {
-    exitflag <- 0
-  }
-  if (exitflag == 1) {
-    x <- get.variables(lprec)
+    x <- lpSolveAPI::get.variables(lprec)
   } else {
     x <- NULL
   }
