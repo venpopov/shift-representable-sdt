@@ -370,15 +370,15 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
   if (r == 0) {
     type <- "DA rank 0"
     soltope <- rep(0, nrow(da)) # soltope is the null vector
-    mr <- lsqisotonic1(y, w, soltope)
+    mr <- lsqisotonic1(y, w, soltope, d = d)
     pred <- mr$pred
     minfit <- mr$fit
   } else if (r == 1) {
     type <- "DA rank 1"
     k <- which.max(colSums(abs(da)))
     t <- da[, k]
-    mr1 <- lsqisotonic1(y, w, t)
-    mr2 <- lsqisotonic1(y, w, -t)
+    mr1 <- lsqisotonic1(y, w, t, d = d)
+    mr2 <- lsqisotonic1(y, w, -t, d = d)
     if (mr1$fit < mr2$fit) {
       minfit <- mr1$fit
       soltope <- t
@@ -432,10 +432,16 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
     tc <- init
     pred <- NULL
     t <- decondense(tc, cond)
-    mr <- lsqisotonic1(y, w, t) # decondense initial tope and fit to data
-    ptc <- tope2perm(tc) # convert to permutation
+    mr <- lsqisotonic1(y, w, t, d = d) # decondense initial tope and fit to data
+
+    # precompute expensive empty diff matrix
+    t2p_n <- (1 + sqrt(1 + 8 * length(tc))) / 2
+    t2perm_d <- mat2diff(diag(t2p_n))
+    ptc <- tope2perm(tc, d = t2perm_d) # convert to permutation
+
     open <- list(list("fit" = mr$fit, "pred" = mr$pred, "perm" = ptc)) # initialize open list
-    closed <- ptc # initialize closed to initial permutation
+    # closed <- ptc # initialize closed to initial permutation
+    closed <- new.env(hash = TRUE, parent = emptyenv(), size = 2000L)
     # initialize optimal fit and solution tope
     if (is.null(input)) {
       minfit <- Inf
@@ -472,12 +478,20 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
         if (sum(j) == rankdc[i]) { # parallelism class defines a face of the cone of tc in col(d)
           xc <- tc
           xc[s] <- -xc[s] # create candidate adjacent tope
-          pxc <- tope2perm(xc)
-          closed_xc <- closed %*% pxc # check if in closed and therefore visited before
-          if (max(closed_xc) < nc) { # not in closed so continue
+          pxc <- tope2perm(xc, d = t2perm_d)
+
+          # Create key: O(n)
+          permutation_key <- paste(pxc, collapse = ",")
+
+          # Hash lookup: O(1)
+          if (!exists(permutation_key, envir = closed, inherits = FALSE)) {
+            # not in closed so continue
+            closed[[permutation_key]] <- TRUE
+
             q <- as.vector(t(xc) %*% H)
             q[abs(q) < tol] <- 0 # projection test
-            if (all(xc == sign(q))) { # xc passes projection test
+            if (all(xc == sign(q))) {
+              # xc passes projection test
               tope <- 1
             } else {
               if (is.null(solveLP_fun(xc, dac))) {
@@ -486,12 +500,15 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
                 tope <- 1
               } # solve LP problem
             }
-            if (tope == 1) { # xc is an adjacent tope
+            if (tope == 1) {
+              # xc is an adjacent tope
               x <- decondense(xc, cond)
-              mr <- lsqisotonic1(y, w, x) # calculate fit
-              open <- append(open, list(list("fit" = mr$fit, "pred" = mr$pred, "perm" = pxc))) # add adjacent tope to open
+              mr <- lsqisotonic1(y, w, x, d = d) # calculate fit
+              open <- append(
+                open,
+                list(list("fit" = mr$fit, "pred" = mr$pred, "perm" = pxc))
+              ) # add adjacent tope to open
             }
-            closed <- rbind(closed, pxc) # add xc to closed as permutation
           }
         }
       }
@@ -502,12 +519,11 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
         open <- open[order(f)] # re-order open by fit
       }
     }
-    # browser()
   }
 
   # arrange output
   if (length(pred) == 0) {
-    mr <- lsqisotonic1(y, w, soltope)
+    mr <- lsqisotonic1(y, w, soltope, d = d)
     pred <- mr$pred
     minfit <- mr$fit
   }
@@ -1021,12 +1037,13 @@ solveLP_col <- function(y = NULL, a = NULL) {
   return(x)
 }
 
-tope2perm <- function(x = NULL) {
+tope2perm <- function(x = NULL, d = NULL) {
   # converts tope x to corresponding permutation
   n <- (1 + sqrt(1 + 8 * length(x))) / 2
-  d <- mat2diff(diag(n))
+  if (is.null(d)) {
+    d <- mat2diff(diag(n))
+  }
   p <- t(d) %*% x
   p[] <- (p + n + 1) / 2
-  p <- as.vector(p)
-  return(p)
+  as.vector(p)
 }

@@ -10,8 +10,8 @@ y2 <- readexp(2, "data/dunn2025/")
 y3 <- readexp(3, "data/dunn2025/")
 
 
-# fitSR(list(y1$total)) |> str(1)
-fitSR(list(y1$total, y2$total, y3$total))
+# fitSR(list(y1$total), nstep = 60) |> str(1)
+# fitSR(list(y1$total, y2$total, y3$total), nstep = 5)
 
 # # times with one dataset
 # # 3.473 sec elapsed
@@ -56,6 +56,6 @@ fitSR(list(y1$total, y2$total, y3$total))
 # })
 
 
-# profvis({
-#   out = fitSR(list(y1$total), solveLP_fun = solveLP_col_ind, simplematrix_fun = simplematrix_fast, nstep=1000)
-# })
+profvis({
+  out = fitSR(list(y1$total), solveLP_fun = solveLP_col, simplematrix_fun = simplematrix_fast, nstep=1000)
+})
