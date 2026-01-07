@@ -524,6 +524,7 @@ mLR <- function(
 
           q <- as.vector(t(xc) %*% H)
           q[abs(q) < tol] <- 0 # projection test
+          
           if (all(xc == sign(q))) {
             # xc passes projection test
             tope <- 1

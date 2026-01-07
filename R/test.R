@@ -21,7 +21,7 @@ y3 <- readexp(3, "data/dunn2025/")
 # o1 = fitSR(list(y1$total), solveLP_fun = solveLP, simplematrix_fun = simplematrix)
 # o2 = fitSR(list(y1$total), solveLP_fun = solveLP, simplematrix_fun = simplematrix_fast)
 # o3 = fitSR(list(y1$total), solveLP_fun = solveLP_col, simplematrix_fun = simplematrix)
-o4 = fitSR(list(y1$total), solveLP_fun = solveLP_col, simplematrix_fun = simplematrix_fast)
+# o4 = fitSR(list(y1$total), solveLP_fun = solveLP_col, simplematrix_fun = simplematrix_fast)
 
 # # times with 2 datasets joint analysis
 # # 55.779 sec elapsed
@@ -51,9 +51,9 @@ o4 = fitSR(list(y1$total), solveLP_fun = solveLP_col, simplematrix_fun = simplem
 
 
 
-# profvis({
-#   out = fitSR(list(y1$total, y2$total, y3$total), solveLP_fun = solveLP_col, simplematrix_fun = simplematrix_fast, nstep=100)
-# })
+profvis({
+  out = fitSR(list(y1$total, y2$total, y3$total), solveLP_fun = solveLP_col, simplematrix_fun = simplematrix_fast, nstep=100)
+})
 
 
 # profvis({
