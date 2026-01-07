@@ -354,6 +354,7 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
       tol <- 1e-5
     } # set tolerance for values nearly zero
   }
+
   # initialize some matrices etc.
   itr <- 0 # step counter
   tictoc::tic() # start timer
@@ -365,6 +366,7 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
   da <- mat2diff(a, 1) # difference matrix of a
   dy <- mat2diff(y) # difference vector of y
   d <- mat2diff(diag(nrow(a))) # difference matrix
+
   # deal with some special cases
   r <- qr(da)$rank
   if (r == 0) {
@@ -398,6 +400,7 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
     cond <- condense(a) # condense a
     dac <- mat2diff(cond$matrix, 1) # difference matrix of condensation of a
     dc <- mat2diff(diag(nrow(cond$matrix))) # difference matrix of order nrow(ac)
+
     if (is.null(parallel)) {
       parallel <- parallelclass(dac, simplematrix_fun)
     } # calculate parallelism classes of dac
@@ -415,6 +418,7 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
       dinit <- mat2diff(init[cond$id])
       init <- as.vector(sign(dinit))
     }
+
     # procedure to repair initial vector if not tope or not feasible
     if (any(init == 0) || is.null(solveLP_fun(init, dac))) {
       md <- mean(abs(dyp))
@@ -423,6 +427,7 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
       dyp <- mat2diff(yp[cond$id])
       init <- as.vector(sign(dyp))
     }
+
     # warn if initial tope is not in permitted set
     if (is.null(solveLP_fun(init, dac))) {
       cat("Warning: Initial tope not in permitted set")
@@ -440,8 +445,8 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
     ptc <- tope2perm(tc, d = t2perm_d) # convert to permutation
 
     open <- list(list("fit" = mr$fit, "pred" = mr$pred, "perm" = ptc)) # initialize open list
-    # closed <- ptc # initialize closed to initial permutation
     closed <- new.env(hash = TRUE, parent = emptyenv(), size = 2000L)
+
     # initialize optimal fit and solution tope
     if (is.null(input)) {
       minfit <- Inf
@@ -451,16 +456,16 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
       soltope <- sign(mat2diff(input$permutation))
     }
     H <- dac %*% MASS::ginv(t(dac) %*% dac) %*% t(dac) # pre-calculate projection matrix on to col(dac)
-    n <- nrow(cond$matrix)
-    nc <- n * (n + 1) * (2 * n + 1) / 6 # pre-calculate sum of permutation elements squared
 
     # start search
     while (length(open) > 0 && itr < nstep && minfit > 0) {
+      browser()
       itr <- itr + 1 # increment step count
       tc <- sign(mat2diff(open[[1]]$perm))
       f <- open[[1]]$fit
       yp <- open[[1]]$pred # retrieve values from open
       open <- open[-1] # remove first element from open
+
       # update if improved fit
       if (f < minfit) {
         minfit <- f
@@ -472,6 +477,7 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
 
       # find adjacent topes
       ds <- abs(dc %*% t(dc) %*% tc) / 2 # indicator of adjacent topes in dc
+
       for (i in 1:length(parallel)) {
         s <- parallel[[i]]
         j <- ds[s] == 1
@@ -480,42 +486,32 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
           xc[s] <- -xc[s] # create candidate adjacent tope
           pxc <- tope2perm(xc, d = t2perm_d)
 
-          # Create key: O(n)
+          # check if candidate already searched
           permutation_key <- paste(pxc, collapse = ",")
+          if (exists(permutation_key, envir = closed, inherits = FALSE)) {
+            break
+          }
 
-          # Hash lookup: O(1)
-          if (!exists(permutation_key, envir = closed, inherits = FALSE)) {
-            # not in closed so continue
-            closed[[permutation_key]] <- TRUE
+          # not in closed so continue
+          closed[[permutation_key]] <- TRUE
 
-            q <- as.vector(t(xc) %*% H)
-            q[abs(q) < tol] <- 0 # projection test
-            if (all(xc == sign(q))) {
-              # xc passes projection test
-              tope <- 1
-            } else {
-              if (is.null(solveLP_fun(xc, dac))) {
-                tope <- 0
-              } else {
-                tope <- 1
-              } # solve LP problem
-            }
-            if (tope == 1) {
-              # xc is an adjacent tope
-              x <- decondense(xc, cond)
-              mr <- lsqisotonic1(y, w, x, d = d) # calculate fit
-              open <- append(
-                open,
-                list(list("fit" = mr$fit, "pred" = mr$pred, "perm" = pxc))
-              ) # add adjacent tope to open
-            }
+          q <- as.vector(t(xc) %*% H)
+          q[abs(q) < tol] <- 0 # projection test
+
+          # solve the LP problem
+          is_tope <- all(xc == sign(q)) || !is.null(solveLP_fun(xc, dac))
+
+          if (is_tope) {
+            # xc is an adjacent tope
+            x <- decondense(xc, cond)
+            mr <- lsqisotonic1(y, w, x, d = d) # calculate fit
+            open <- c(open, list(list("fit" = mr$fit, "pred" = mr$pred, "perm" = pxc)))
           }
         }
       }
+
       if (length(open) > 0) {
-        f <- sapply(open, function(x) {
-          x[[1]]
-        }) # create vector of fit values in open
+        f <- sapply(open, function(x) x[[1]]) # create vector of fit values in open
         open <- open[order(f)] # re-order open by fit
       }
     }
