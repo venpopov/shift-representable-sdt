@@ -525,24 +525,17 @@ mLR <- function(
           q <- as.vector(t(xc) %*% H)
           q[abs(q) < tol] <- 0 # projection test
           
-          if (all(xc == sign(q))) {
-            # xc passes projection test
-            tope <- 1
-          } else {
-            if (is.null(solveLP_fun(xc, dac))) {
-              tope <- 0
-            } else {
-              tope <- 1
-            } # solve LP problem
-          }
-          if (tope == 1) {
+          # solve the LP problem
+          is_tope <- all(xc == sign(q)) || !is.null(solveLP_fun(xc, dac))
+
+          if (is_tope) {
             # xc is an adjacent tope
             x <- decondense(xc, cond)
             mr <- lsqisotonic1(y, w, x, d = d) # calculate fit
-            open <- append(
+            open <- c(
               open,
               list(list("fit" = mr$fit, "pred" = mr$pred, "perm" = pxc))
-            ) # add adjacent tope to open
+            )
           }
         }
       }
