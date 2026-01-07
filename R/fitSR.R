@@ -1,6 +1,14 @@
 # Original script by John Dunn, retrieved from https://osf.io/n62y4/files/osfstorage
 
-fitSR <- function(data = NULL, design = NULL, nstep = 20, init = NULL, input = NULL, solveLP_fun = solveLP_col, simplematrix_fun = simplematrix_fast) {
+fitSR <- function(
+  data = NULL,
+  design = NULL,
+  nstep = 20,
+  init = NULL,
+  input = NULL,
+  solveLP_fun = solveLP_col,
+  simplematrix_fun = simplematrix_fast
+) {
   # takes as input a nr x nc matrix of counts
   # columns correspond to rating categories with confidence that the item is old decreasing from left to right
   # rows correspond to conditions
@@ -16,19 +24,19 @@ fitSR <- function(data = NULL, design = NULL, nstep = 20, init = NULL, input = N
   yy <- 1 - makedatavector(y)
 
   if (is.null(input)) {
-      for (i in seq_along(y)) {
-        nr <- nrow(y[[i]])
-        nc <- ncol(y[[i]]) - 1
-        a <- sdtdesign(c(nr, nc))
-        if (is.null(design)) {
-          design <- a
-        } else {
-          design <- magic::adiag(design, a)
-        }
+    for (i in seq_along(y)) {
+      nr <- nrow(y[[i]])
+      nc <- ncol(y[[i]]) - 1
+      a <- sdtdesign(c(nr, nc))
+      if (is.null(design)) {
+        design <- a
+      } else {
+        design <- magic::adiag(design, a)
       }
+    }
 
     weights <- makeweights(y)
-  } 
+  }
 
   out <- mLR(
     data = yy,
@@ -40,7 +48,9 @@ fitSR <- function(data = NULL, design = NULL, nstep = 20, init = NULL, input = N
     simplematrix_fun = simplematrix_fun
   )
 
-  if (length(y) == 1) y <- y[[1]]
+  if (length(y) == 1) {
+    y <- y[[1]]
+  }
   out$y <- y
   out$py <- makedatamatrix(1 - out$predicted, out$y)
   out$g2 <- getgsq(out$py, out$y)
@@ -51,7 +61,9 @@ fitSR <- function(data = NULL, design = NULL, nstep = 20, init = NULL, input = N
 
 makedatavector <- function(y) {
   # concatenates a list of data matrices to a single vector of cumulative proportions
-  if (!is.list(y)) y <- list(y) # Ensure y is a list
+  if (!is.list(y)) {
+    y <- list(y)
+  } # Ensure y is a list
 
   yy <- numeric(0) # Initialize an empty vector
 
@@ -155,8 +167,12 @@ makeweights <- function(y) {
 }
 
 getgsq <- function(py, y) {
-  if (!is.list(y)) y <- list(y)
-  if (!is.list(py)) py <- list(py)
+  if (!is.list(y)) {
+    y <- list(y)
+  }
+  if (!is.list(py)) {
+    py <- list(py)
+  }
 
   g2 <- numeric(length(y)) # Initialize the result vector
 
@@ -300,8 +316,18 @@ factdesign <- function(levels, nrep = 0) {
   return(A)
 }
 
-mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, parallel = NULL, init = NULL, 
-  tol = NULL, input = NULL, solveLP_fun = solveLP_col, simplematrix_fun = simplematrix_fast) {
+mLR <- function(
+  data = NULL,
+  weights = NULL,
+  design = NULL,
+  nstep = Inf,
+  parallel = NULL,
+  init = NULL,
+  tol = NULL,
+  input = NULL,
+  solveLP_fun = solveLP_col,
+  simplematrix_fun = simplematrix_fast
+) {
   # solves the monotonic Linear Regression problem
   # data is a n-vector of observations
   # weights is an n x n matrix of weights (default=identity matrix)
@@ -354,7 +380,6 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
       tol <- 1e-5
     } # set tolerance for values nearly zero
   }
-
   # initialize some matrices etc.
   itr <- 0 # step counter
   tictoc::tic() # start timer
@@ -410,11 +435,13 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
     } # store dc sub-matrix ranks
     u <- a %*% MASS::ginv(t(a) %*% w %*% a) %*% t(a) %*% w # calculate useful matrix
 
-    if (is.null(init)) { # calculate initial tope if required
+    if (is.null(init)) {
+      # calculate initial tope if required
       yp <- u %*% y # weighted projection of y onto col(a)
       dyp <- mat2diff(yp[cond$id]) # difference matrix of condensation of yp
       init <- as.vector(sign(dyp)) # initial tope
-    } else { # convert from permutation to condensed tope
+    } else {
+      # convert from permutation to condensed tope
       dinit <- mat2diff(init[cond$id])
       init <- as.vector(sign(dinit))
     }
@@ -455,6 +482,7 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
       minfit <- input$fit
       soltope <- sign(mat2diff(input$permutation))
     }
+
     H <- dac %*% MASS::ginv(t(dac) %*% dac) %*% t(dac) # pre-calculate projection matrix on to col(dac)
 
     # start search
@@ -480,7 +508,8 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
       for (i in 1:length(parallel)) {
         s <- parallel[[i]]
         j <- ds[s] == 1
-        if (sum(j) == rankdc[i]) { # parallelism class defines a face of the cone of tc in col(d)
+        if (sum(j) == rankdc[i]) {
+          # parallelism class defines a face of the cone of tc in col(d)
           xc <- tc
           xc[s] <- -xc[s] # create candidate adjacent tope
           pxc <- tope2perm(xc, d = t2perm_d)
@@ -488,29 +517,39 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
           # check if candidate already searched
           permutation_key <- paste(pxc, collapse = ",")
           if (exists(permutation_key, envir = closed, inherits = FALSE)) {
-            break
+            next
           }
 
-          # not in closed so continue
           closed[[permutation_key]] <- TRUE
 
           q <- as.vector(t(xc) %*% H)
           q[abs(q) < tol] <- 0 # projection test
-
-          # solve the LP problem
-          is_tope <- all(xc == sign(q)) || !is.null(solveLP_fun(xc, dac))
-
-          if (is_tope) {
+          if (all(xc == sign(q))) {
+            # xc passes projection test
+            tope <- 1
+          } else {
+            if (is.null(solveLP_fun(xc, dac))) {
+              tope <- 0
+            } else {
+              tope <- 1
+            } # solve LP problem
+          }
+          if (tope == 1) {
             # xc is an adjacent tope
             x <- decondense(xc, cond)
             mr <- lsqisotonic1(y, w, x, d = d) # calculate fit
-            open <- c(open, list(list("fit" = mr$fit, "pred" = mr$pred, "perm" = pxc)))
+            open <- append(
+              open,
+              list(list("fit" = mr$fit, "pred" = mr$pred, "perm" = pxc))
+            ) # add adjacent tope to open
           }
         }
       }
 
       if (length(open) > 0) {
-        f <- sapply(open, function(x) x[[1]]) # create vector of fit values in open
+        f <- sapply(open, function(x) {
+          x[[1]]
+        }) # create vector of fit values in open
         open <- open[order(f)] # re-order open by fit
       }
     }
@@ -522,18 +561,21 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
     pred <- mr$pred
     minfit <- mr$fit
   }
+
   # calculate regression weights
   if (qr(da)$rank > 0) {
     x <- solveLP_fun(soltope, da)
   } else {
     x <- rep(0, ncol(a))
   }
+
   # calculate linear estimates
   if (!is.null(x)) {
     xp <- as.vector(a %*% x)
   } else {
     xp <- NULL
   }
+
   soltope <- as.vector(soltope)
   # append to previous results if input specified
   if (!is.null(input)) {
@@ -541,17 +583,30 @@ mLR <- function(data = NULL, weights = NULL, design = NULL, nstep = Inf, paralle
     fits <- c(input$fits, fits)
     minfits <- c(input$minfits, minfits)
   }
+
   k <- which(minfits == minfit)
   mitr <- k[1] # step counter of minimum fit
   permutation <- tope2perm(soltope)
   dur <- tictoc::toc()
-  output <- list(
-    "fit" = minfit, "data" = y, "predicted" = pred, "permutation" = permutation, "x" = x,
-    "z" = xp, "nstep" = itr, "mstep" = mitr, "fits" = fits, "minfits" = minfits, "design" = a, "weights" = w,
-    "parallel" = parallel, "tol" = tol, "type" = type, "init" = init, "duration" = dur$callback_msg
+  list(
+    "fit" = minfit,
+    "data" = y,
+    "predicted" = pred,
+    "permutation" = permutation,
+    "x" = x,
+    "z" = xp,
+    "nstep" = itr,
+    "mstep" = mitr,
+    "fits" = fits,
+    "minfits" = minfits,
+    "design" = a,
+    "weights" = w,
+    "parallel" = parallel,
+    "tol" = tol,
+    "type" = type,
+    "init" = init,
+    "duration" = dur$callback_msg
   )
-
-  return(output)
 }
 
 factdesign <- function(levels = NULL, addflag = 0) {
@@ -628,8 +683,7 @@ factdesign <- function(levels = NULL, addflag = 0) {
       }
     }
   }
-  A <- cbind(c(rep(1, nrow(A))), A) # add intercept
-  return(A)
+  cbind(c(rep(1, nrow(A))), A) # add intercept
 }
 
 mat2diff <- function(A = NULL, flag = 0) {
@@ -747,9 +801,8 @@ lsqisotonic1 <- function(y = NULL, w = NULL, t = NULL, d = NULL) {
   } else {
     out <- NULL
   }
-  # store in out
-  out <- list("pred" = yhat, "fit" = fit)
-  return(out)
+
+  list("pred" = yhat, "fit" = fit)
 }
 
 d2t <- function(x = NULL, n = NULL) {
@@ -823,14 +876,17 @@ simplematrix <- function(a) {
   }
   s <- a[ia, ]
   ic[ic < 0] <- 0
-  out <- list("matrix" = s, "id" = ia, "index" = ic)
-  return(out)
+  list("matrix" = s, "id" = ia, "index" = ic)
 }
 
 simplematrix_fast <- function(a) {
   n <- nrow(a)
   if (is.null(n) || n == 0L) {
-    return(list(matrix = a[FALSE, , drop = FALSE], id = integer(0), index = integer(0)))
+    return(list(
+      matrix = a[FALSE, , drop = FALSE],
+      id = integer(0),
+      index = integer(0)
+    ))
   }
 
   # Make it integer if it is numeric-but-whole (so we can be exact)
@@ -838,7 +894,9 @@ simplematrix_fast <- function(a) {
     if (all(is.finite(a)) && all(a == round(a))) {
       storage.mode(a) <- "integer"
     } else {
-      stop("simplematrix_fast: to guarantee identical output, a must be integer (or numeric with all whole numbers).")
+      stop(
+        "simplematrix_fast: to guarantee identical output, a must be integer (or numeric with all whole numbers)."
+      )
     }
   }
 
@@ -866,7 +924,9 @@ simplematrix_fast <- function(a) {
     z <- abs(r[r != 0L])
     g <- z[1L]
     if (length(z) > 1L) {
-      for (k in 2L:length(z)) g <- gcd2(g, z[k])
+      for (k in 2L:length(z)) {
+        g <- gcd2(g, z[k])
+      }
     }
     g
   }
@@ -881,7 +941,9 @@ simplematrix_fast <- function(a) {
 
     # fix sign: make first nonzero positive
     first <- which(v != 0L)[1L]
-    if (v[first] < 0L) v <- -v
+    if (v[first] < 0L) {
+      v <- -v
+    }
 
     keys[k] <- paste(v, collapse = ",")
   }
@@ -927,32 +989,29 @@ condense <- function(a) {
     id <- id[-j]
   }
   ac <- a[id, ]
-  out <- list("matrix" = ac, "id" = id, "index" = ic)
-  return(out)
+  list("matrix" = ac, "id" = id, "index" = ic)
 }
 
 decondense <- function(x = NULL, cond = NULL) {
   # decondenses a condensed sign difference vector according to cond
   # cond is output from condense(a) where a is the design matrix
   if (is.null(x)) {
-    cat("Error: Tope not specified.")
-  } else {
-    ic <- cond$index
-    u <- unique(ic)
-    if (length(ic) > length(u)) {
-      if (length(ic) == 1) {
-        y <- rep(x, length(ic))
-      } else {
-        p <- tope2perm(x)
-        p <- p[ic]
-        y <- sign(mat2diff(p))
-      }
+    stop("Error: Tope not specified.")
+  } 
+  ic <- cond$index
+  u <- unique(ic)
+  if (length(ic) > length(u)) {
+    if (length(ic) == 1) {
+      y <- rep(x, length(ic))
     } else {
-      y <- x
+      p <- tope2perm(x)
+      p <- p[ic]
+      y <- sign(mat2diff(p))
     }
-    y <- as.vector(y)
-    return(y)
+  } else {
+    y <- x
   }
+  as.vector(y)
 }
 
 solveLP <- function(y = NULL, a = NULL) {
@@ -1011,7 +1070,6 @@ solveLP_col <- function(y = NULL, a = NULL) {
   constraint_types <- c("<=", "=", ">=")[sign_y + 2L]
   lpSolveAPI::set.constr.type(lprec, constraint_types)
   lpSolveAPI::set.rhs(lprec, sign_y)
-
 
   lpSolveAPI::set.bounds(
     lprec,
