@@ -323,7 +323,7 @@ mLR <- function(
   nstep = Inf,
   parallel = NULL,
   init = NULL,
-  tol = NULL,
+  tol = 1e-5,
   input = NULL,
   solveLP_fun = solveLP_col,
   simplematrix_fun = simplematrix_fast
@@ -342,9 +342,6 @@ mLR <- function(
   # and vectors of fits and best fits for each step
   # checked against matlab code on 23 Oct 2025
 
-  if (is.null(nstep)) {
-    nstep <- Inf
-  }
   if (!is.null(input)) {
     y <- input$data
     w <- input$weights
@@ -354,41 +351,33 @@ mLR <- function(
     tol <- input$tol
   } else {
     y <- data
-    w <- weights
-    a <- design
-    #    if (is.data.frame(y)) {y = y[,]} # convert data to vector
     if (is.data.frame(y)) {
       y <- as.vector(y)
-    } # convert data to vector
+    }
     n <- length(y)
-    if (is.null(w)) {
-      w <- diag(rep(1, n))
-    } # default identity matrix
+    w <- weights %||% diag(rep(1, n))
+    a <- design %||% matrix(rep(1, n), n, 1) # default intercept model
+
     if (is.data.frame(w)) {
       w <- data.matrix(w)
-    } # convert to matrix
+    }
+
     if (is.vector(w)) {
       w <- diag(w)
-    } # convert vector to matrix form
-    if (is.null(a)) {
-      a <- matrix(rep(1, n), n, 1)
-    } # default intercept model
+    }
+
     if (is.data.frame(a)) {
       a <- data.matrix(a)
-    } # convert to matrix
-    if (is.null(tol)) {
-      tol <- 1e-5
-    } # set tolerance for values nearly zero
+    }
   }
+
   # initialize some matrices etc.
   itr <- 0 # step counter
   tictoc::tic() # start timer
   fits <- c()
   minfits <- c() # initialize arrays to contain current fit and best fit on each step
-  if (is.vector(a)) {
-    a <- as.matrix(a)
-  } # make sure a is a matrix
-  da <- mat2diff(a, 1) # difference matrix of a
+  if (is.vector(a)) a <- as.matrix(a)
+  da <- mat2diff(a, 1) # difference matrix of a# re-order open by fit# re-order open by fit
   dy <- mat2diff(y) # difference vector of y
   d <- mat2diff(diag(nrow(a))) # difference matrix
 
@@ -420,33 +409,23 @@ mLR <- function(
     soltope <- sign(dy)
     minfit <- 0
     pred <- y
-  } else { # search topes for a solution
+  } else {
+    # search topes for a solution
     type <- "Search"
-    cond <- condense(a) # condense a
+    cond <- condense(a)
     dac <- mat2diff(cond$matrix, 1) # difference matrix of condensation of a
     dc <- mat2diff(diag(nrow(cond$matrix))) # difference matrix of order nrow(ac)
 
-    if (is.null(parallel)) {
-      parallel <- parallelclass(dac, simplematrix_fun)
-    } # calculate parallelism classes of dac
-    rankdc <- rep(0, length(parallel))
-    for (i in 1:length(parallel)) {
-      rankdc[i] <- qr(dc[parallel[[i]], ])$rank
-    } # store dc sub-matrix ranks
-    u <- a %*% MASS::ginv(t(a) %*% w %*% a) %*% t(a) %*% w # calculate useful matrix
+    parallel <- parallel %||% parallelclass(dac, simplematrix_fun)
+    rankdc <- sapply(parallel, function(x) qr(dc[x, ])$rank) # store dc sub-matrix ranks
+    u <- a %*% MASS::ginv(t(a) %*% w %*% a) %*% t(a) %*% w # calculate useful matrix (???)
 
-    if (is.null(init)) {
-      # calculate initial tope if required
-      yp <- u %*% y # weighted projection of y onto col(a)
-      dyp <- mat2diff(yp[cond$id]) # difference matrix of condensation of yp
-      init <- as.vector(sign(dyp)) # initial tope
-    } else {
-      # convert from permutation to condensed tope
-      dinit <- mat2diff(init[cond$id])
-      init <- as.vector(sign(dinit))
-    }
+    # calculate initial tope if required
+    init <- init %||% (u %*% y) # weighted projection of y onto col(a)
+    dyp <- mat2diff(init[cond$id])
+    init <- as.vector(sign(dyp))
 
-    # procedure to repair initial vector if not tope or not feasible
+    # repair initial vector if not tope or not feasible
     if (any(init == 0) || is.null(solveLP_fun(init, dac))) {
       md <- mean(abs(dyp))
       my <- y + .1 * runif(length(y), -md, md) # add some random jitter to y
@@ -457,7 +436,7 @@ mLR <- function(
 
     # warn if initial tope is not in permitted set
     if (is.null(solveLP_fun(init, dac))) {
-      cat("Warning: Initial tope not in permitted set")
+      warning("Initial tope not in permitted set")
     }
 
     # set up search
@@ -472,7 +451,7 @@ mLR <- function(
     ptc <- tope2perm(tc, d = t2perm_d) # convert to permutation
 
     open <- list(list("fit" = mr$fit, "pred" = mr$pred, "perm" = ptc)) # initialize open list
-    closed <- new.env(hash = TRUE, parent = emptyenv(), size = 2000L)
+    closed <- new.env(hash = TRUE, parent = emptyenv(), size = 2000L) # store visited permutations to avoid checking
 
     # initialize optimal fit and solution tope
     if (is.null(input)) {
@@ -500,7 +479,7 @@ mLR <- function(
         pred <- yp
       }
       fits <- c(fits, f)
-      minfits <- c(minfits, minfit) # append current and best fits
+      minfits <- c(minfits, minfit)
 
       # find adjacent topes
       ds <- abs(dc %*% t(dc) %*% tc) / 2 # indicator of adjacent topes in dc
@@ -510,45 +489,43 @@ mLR <- function(
 
       for (i in 1:length(parallel)) {
         s <- parallel[[i]]
-        j <- ds[s] == 1
-        if (sum(j) == rankdc[i]) {
-          # parallelism class defines a face of the cone of tc in col(d)
-          xc <- tc
-          xc[s] <- -xc[s] # create candidate adjacent tope
-          pxc <- tope2perm(xc, d = t2perm_d)
+        if (sum(ds[s] == 1) != rankdc[i]) {
+          next
+        }
 
-          # check if candidate already searched
-          permutation_key <- paste(pxc, collapse = ",")
-          if (exists(permutation_key, envir = closed, inherits = FALSE)) {
-            next
-          }
+        # parallelism class defines a face of the cone of tc in col(d)
+        xc <- tc
+        xc[s] <- -xc[s] # create candidate adjacent tope
+        pxc <- tope2perm(xc, d = t2perm_d)
 
-          closed[[permutation_key]] <- TRUE
-          
-          # browser()
-          # q <- as.vector(t(xc) %*% H)
-          q_diff <- t(xc[s]) %*% H[s,]
-          q <- as.vector(q_base + 2*q_diff)
-          q[abs(q) < tol] <- 0 # projection test
-          
-          # solve the LP problem
-          is_tope <- all(xc == sign(q)) || !is.null(solveLP_fun(xc, dac))
+        # check if candidate already searched
+        permutation_key <- paste(pxc, collapse = ",")
+        if (exists(permutation_key, envir = closed, inherits = FALSE)) {
+          next
+        }
+        closed[[permutation_key]] <- TRUE
 
-          if (is_tope) {
-            # xc is an adjacent tope
-            x <- decondense(xc, cond)
-            mr <- lsqisotonic1(y, w, x, d = d) # calculate fit
-            open <- c(
-              open,
-              list(list("fit" = mr$fit, "pred" = mr$pred, "perm" = pxc))
-            )
-          }
+        q_diff <- t(xc[s]) %*% H[s, ]
+        q <- as.vector(q_base + 2 * q_diff)
+        q[abs(q) < tol] <- 0 # projection test
+
+        # solve the LP problem
+        is_adjacent_tope <- all(xc == sign(q)) || !is.null(solveLP_fun(xc, dac))
+
+        if (is_adjacent_tope) {
+          x <- decondense(xc, cond)
+          mr <- lsqisotonic1(y, w, x, d = d) # calculate fit
+          open <- c(
+            open,
+            list(list(fit = mr$fit, pred = mr$pred, perm = pxc))
+          )
         }
       }
 
       if (length(open) > 0) {
-        f <- sapply(open, function(x) x[[1]]) # create vector of fit values in open
-        open <- open[order(f)] # re-order open by fit
+        # re-order open by fit
+        f <- sapply(open, function(x) x[[1]])
+        open <- open[order(f)]
       }
     }
   }
@@ -560,22 +537,6 @@ mLR <- function(
     minfit <- mr$fit
   }
 
-  # calculate regression weights
-  if (qr(da)$rank > 0) {
-    x <- solveLP_fun(soltope, da)
-  } else {
-    x <- rep(0, ncol(a))
-  }
-
-  # calculate linear estimates
-  if (!is.null(x)) {
-    xp <- as.vector(a %*% x)
-  } else {
-    xp <- NULL
-  }
-
-  soltope <- as.vector(soltope)
-
   # append to previous results if input specified
   if (!is.null(input)) {
     itr <- itr + input$nstep
@@ -583,19 +544,19 @@ mLR <- function(
     minfits <- c(input$minfits, minfits)
   }
 
-  k <- which(minfits == minfit)
-  mitr <- k[1] # step counter of minimum fit
-  permutation <- tope2perm(soltope)
-  dur <- tictoc::toc()
+  # calculate regression weights and calculate linear estimates
+  x <- if (qr(da)$rank > 0) solveLP_fun(soltope, da) else rep(0, ncol(a))
+  xp <- if (!is.null(x)) as.vector(a %*% x) else NULL
+
   list(
     "fit" = minfit,
     "data" = y,
     "predicted" = pred,
-    "permutation" = permutation,
+    "permutation" = tope2perm(as.vector(soltope)),
     "x" = x,
     "z" = xp,
     "nstep" = itr,
-    "mstep" = mitr,
+    "mstep" = which(minfits == minfit)[1],
     "fits" = fits,
     "minfits" = minfits,
     "design" = a,
@@ -604,7 +565,7 @@ mLR <- function(
     "tol" = tol,
     "type" = type,
     "init" = init,
-    "duration" = dur$callback_msg
+    "duration" = tictoc::toc()$callback_msg
   )
 }
 
@@ -1076,17 +1037,11 @@ solveLP_col <- function(y = NULL, a = NULL) {
     upper = rep(Inf, m),
     columns = 1:m
   )
-  solve(lprec)
-  exitflag <- 1
+  solve(lprec) 
   if (lpSolveAPI::get.solutioncount(lprec) == 0) {
-    exitflag <- 0
+    return(NULL)
   }
-  if (exitflag == 1) {
-    x <- lpSolveAPI::get.variables(lprec)
-  } else {
-    x <- NULL
-  }
-  return(x)
+  lpSolveAPI::get.variables(lprec)
 }
 
 tope2perm <- function(x = NULL, d = NULL) {
