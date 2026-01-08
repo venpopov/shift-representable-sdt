@@ -505,6 +505,9 @@ mLR <- function(
       # find adjacent topes
       ds <- abs(dc %*% t(dc) %*% tc) / 2 # indicator of adjacent topes in dc
 
+      # precompute q values
+      q_base <- as.vector(t(tc) %*% H)
+
       for (i in 1:length(parallel)) {
         s <- parallel[[i]]
         j <- ds[s] == 1
@@ -521,8 +524,11 @@ mLR <- function(
           }
 
           closed[[permutation_key]] <- TRUE
-
-          q <- as.vector(t(xc) %*% H)
+          
+          # browser()
+          # q <- as.vector(t(xc) %*% H)
+          q_diff <- t(xc[s]) %*% H[s,]
+          q <- as.vector(q_base + 2*q_diff)
           q[abs(q) < tol] <- 0 # projection test
           
           # solve the LP problem
@@ -541,9 +547,7 @@ mLR <- function(
       }
 
       if (length(open) > 0) {
-        f <- sapply(open, function(x) {
-          x[[1]]
-        }) # create vector of fit values in open
+        f <- sapply(open, function(x) x[[1]]) # create vector of fit values in open
         open <- open[order(f)] # re-order open by fit
       }
     }
@@ -571,6 +575,7 @@ mLR <- function(
   }
 
   soltope <- as.vector(soltope)
+
   # append to previous results if input specified
   if (!is.null(input)) {
     itr <- itr + input$nstep

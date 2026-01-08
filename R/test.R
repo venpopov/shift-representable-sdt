@@ -41,19 +41,19 @@ y3 <- readexp(3, "data/dunn2025/")
 # o1_3 = fitSR(list(y1$total, y2$total, y3$total), solveLP_fun = solveLP, simplematrix_fun = simplematrix)
 # o2_3 = fitSR(list(y1$total, y2$total, y3$total), solveLP_fun = solveLP, simplematrix_fun = simplematrix_fast)
 # o3_3 = fitSR(list(y1$total, y2$total, y3$total), solveLP_fun = solveLP_col, simplematrix_fun = simplematrix)
-# o4_3 = fitSR(list(y1$total, y2$total, y3$total), solveLP_fun = solveLP_col, simplematrix_fun = simplematrix_fast)
+o4_3 = fitSR(list(y1$total, y2$total, y3$total), solveLP_fun = solveLP_col, simplematrix_fun = simplematrix_fast)
 
 # # times with 3 datasets joint analysis
 # o1_3a = fitSR(list(y1$total, y2$total, y3$total), solveLP_fun = solveLP, simplematrix_fun = simplematrix, nstep=100)
 # o2_3a = fitSR(list(y1$total, y2$total, y3$total), solveLP_fun = solveLP, simplematrix_fun = simplematrix_fast, nstep=100)
 # o3_3a = fitSR(list(y1$total, y2$total, y3$total), solveLP_fun = solveLP_col, simplematrix_fun = simplematrix, nstep=100)
-# o4_3a = fitSR(list(y1$total, y2$total, y3$total), solveLP_fun = solveLP_col, simplematrix_fun = simplematrix_fast, nstep=100)
+o4_3a = fitSR(list(y1$total, y2$total, y3$total), solveLP_fun = solveLP_col, simplematrix_fun = simplematrix_fast, nstep=100)
 
 
 
-profvis({
-  out = fitSR(list(y1$total, y2$total, y3$total), solveLP_fun = solveLP_col, simplematrix_fun = simplematrix_fast, nstep=100)
-})
+# profvis({
+#   out = fitSR(list(y1$total, y2$total, y3$total), solveLP_fun = solveLP_col, simplematrix_fun = simplematrix_fast, nstep=20)
+# })
 
 
 # profvis({
