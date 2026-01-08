@@ -1,7 +1,7 @@
 # Original script by John Dunn, retrieved from https://osf.io/n62y4/files/osfstorage
 
 fitSR <- function(
-  data = NULL,
+  data,
   design = NULL,
   nstep = 20,
   init = NULL,
@@ -63,21 +63,16 @@ makedatavector <- function(y) {
   # concatenates a list of data matrices to a single vector of cumulative proportions
   if (!is.list(y)) {
     y <- list(y)
-  } # Ensure y is a list
+  }
 
-  yy <- numeric(0) # Initialize an empty vector
-
-  for (i in 1:length(y)) {
-    cy <- t(apply(y[[i]], 1, cumsum)) # Cumulative sum over columns
+  out <- sapply(y, function(x) {
+    cy <- t(apply(x, 1, cumsum)) # Cumulative sum over columns
     t <- matrix(rep(cy[, ncol(cy)], ncol(cy)), ncol = ncol(cy)) # Replicate the last column
     py <- cy / t # Normalize by dividing by the last column
     py <- py[, -ncol(py)] # Remove the last column
-
-    # Reshape py and append it to yy
-    yy <- c(yy, as.vector(t(py)))
-  }
-
-  return(yy)
+    as.vector(t(py))
+  })
+  as.vector(out)
 }
 
 makedatamatrix <- function(p, y) {
@@ -85,7 +80,6 @@ makedatamatrix <- function(p, y) {
   # p: numeric vector of predicted values (cumulative probabilities, last missing)
   # y: list (cell array equivalent) of matrices of observed counts
 
-  # Ensure y is a list
   if (!is.list(y)) {
     y <- list(y)
   }
@@ -133,7 +127,7 @@ makedatamatrix <- function(p, y) {
     py <- py[[1]]
   }
 
-  return(py)
+  py
 }
 
 makeweights <- function(y) {
@@ -161,9 +155,7 @@ makeweights <- function(y) {
   }
 
   # Convert sparse Matrix (from bdiag) to standard matrix
-  w <- as.matrix(w)
-
-  return(w)
+  as.matrix(w)
 }
 
 getgsq <- function(py, y) {
@@ -174,26 +166,19 @@ getgsq <- function(py, y) {
     py <- list(py)
   }
 
-  g2 <- numeric(length(y)) # Initialize the result vector
-
-  for (i in seq_along(y)) {
+  sapply(seq_along(y), function(i) {
     # Get the sum of the matrix y[[i]]
     n <- sum(y[[i]], na.rm = TRUE)
-    p <- py[[i]]
-
     # Prevent zeroes in p
-    p[p == 0] <- 1 / n
-    py[[i]] <- p
+    py[[i]][py[[i]] == 0] <- 1 / n
 
     # Compute the z matrix (element-wise log and multiplication)
     z <- 2 * y[[i]] * log(y[[i]] / py[[i]])
     z[y[[i]] == 0] <- 0 # Set z to 0 where y[[i]] is 0
 
     # Sum up the values of z and assign to g2[i]
-    g2[i] <- sum(z, na.rm = TRUE)
-  }
-
-  return(g2)
+    sum(z, na.rm = TRUE)
+  })
 }
 
 sdtdesign <- function(levels, zeroflag = 0) {
