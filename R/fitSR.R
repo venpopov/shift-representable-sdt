@@ -340,7 +340,7 @@ mLR <- function(
       y <- as.vector(y)
     }
     n <- length(y)
-    w <- weights %||% diag(rep(1, n))
+    w <- weights %||% diag(n)
     a <- design %||% matrix(rep(1, n), n, 1) # default intercept model
 
     if (is.data.frame(w)) {
@@ -362,9 +362,10 @@ mLR <- function(
   fits <- c()
   minfits <- c() # initialize arrays to contain current fit and best fit on each step
   if (is.vector(a)) a <- as.matrix(a)
-  da <- mat2diff(a, 1) # difference matrix of a# re-order open by fit# re-order open by fit
+  da <- mat2diff(a, 1) # difference matrix of a
   dy <- mat2diff(y) # difference vector of y
   d <- mat2diff(diag(nrow(a))) # difference matrix
+  LP_output <- NULL
 
   # deal with some special cases
   r <- qr(da)$rank
@@ -473,13 +474,10 @@ mLR <- function(
 
       # precompute q values
       q_base <- as.vector(t(tc) %*% H)
+      
+      is_adjacent <- sapply(parallel, function(s) sum(ds[s] == 1)) == rankdc
 
-      for (i in 1:length(parallel)) {
-        s <- parallel[[i]]
-        if (sum(ds[s] == 1) != rankdc[i]) {
-          next
-        }
-
+      for (s in parallel[is_adjacent]) {
         # parallelism class defines a face of the cone of tc in col(d)
         xc <- tc
         xc[s] <- -xc[s] # create candidate adjacent tope
@@ -492,27 +490,25 @@ mLR <- function(
         }
         closed[[permutation_key]] <- TRUE
 
+        # adjust q values for new tope
         q_diff <- t(xc[s]) %*% H[s, ]
         q <- as.vector(q_base + 2 * q_diff)
-        q[abs(q) < tol] <- 0 # projection test
-
+        q[abs(q) < tol] <- 0
+      
         # solve the LP problem
-        is_adjacent_tope <- all(xc == sign(q)) || !is.null(solveLP_fun(xc, dac, LP_output$lp_object_pointer)$solution)
-
-        if (is_adjacent_tope) {
+        is_tope_feasible <- all(xc == sign(q)) || !is.null(solveLP_fun(xc, dac, LP_output$lp_object_pointer)$solution)
+        
+        if (is_tope_feasible) {
           x <- decondense(xc, cond)
           mr <- lsqisotonic1(y, w, x, d = d) # calculate fit
-          open <- c(
-            open,
-            list(list(fit = mr$fit, pred = mr$pred, perm = pxc))
-          )
-        }
+          candidate <- list(fit = mr$fit, pred = mr$pred, perm = pxc)
+          open <- c(open, list(candidate))
+        } 
       }
 
       if (length(open) > 0) {
-        # re-order open by fit
-        f <- sapply(open, function(x) x[[1]])
-        open <- open[order(f)]
+        open_fits <- sapply(open, function(x) x$fit)
+        open <- open[order(open_fits)]
       }
     }
   }
@@ -999,7 +995,7 @@ solveLP <- function(y = NULL, a = NULL) {
   return(x)
 }
 
-solveLP_col <- function(y = NULL, a = NULL, lp_object_pointer) {
+solveLP_col <- function(y = NULL, a = NULL, lp_object_pointer = NULL) {
   # determines if sign(y) is a covector of matrix a
   # solves LP problem
   # if no solution then returns NULL
@@ -1009,7 +1005,7 @@ solveLP_col <- function(y = NULL, a = NULL, lp_object_pointer) {
   m <- ncol(a)
   sign_y <- sign(y)
   
-  if (missing(lp_object_pointer)) {
+  if (is.null(lp_object_pointer)) {
     lprec <- lpSolveAPI::make.lp(n, m)
     
     for (i in seq.int(m)) {
