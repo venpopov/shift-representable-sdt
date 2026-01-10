@@ -389,7 +389,7 @@ mLR <- function(
       soltope <- -t
       pred <- mr2$pred
     }
-  } else if (!is.null(solveLP_fun(dy, da))) {
+  } else if (!is.null(solveLP_fun(dy, da)$solution)) {
     type <- "Data conform to permitted permutation"
     soltope <- sign(dy)
     minfit <- 0
@@ -410,8 +410,10 @@ mLR <- function(
     dyp <- mat2diff(init[cond$id])
     init <- as.vector(sign(dyp))
 
+    LP_output <- solveLP_fun(init, dac)
+    
     # repair initial vector if not tope or not feasible
-    if (any(init == 0) || is.null(solveLP_fun(init, dac))) {
+    if (any(init == 0) || is.null(LP_output$solution)) {
       md <- mean(abs(dyp))
       my <- y + .1 * runif(length(y), -md, md) # add some random jitter to y
       yp <- u %*% my # weighted projection of my onto col(a)
@@ -420,7 +422,7 @@ mLR <- function(
     }
 
     # warn if initial tope is not in permitted set
-    if (is.null(solveLP_fun(init, dac))) {
+    if (is.null(solveLP_fun(init, dac, LP_output$lp_object_pointer))) {
       warning("Initial tope not in permitted set")
     }
 
@@ -495,7 +497,7 @@ mLR <- function(
         q[abs(q) < tol] <- 0 # projection test
 
         # solve the LP problem
-        is_adjacent_tope <- all(xc == sign(q)) || !is.null(solveLP_fun(xc, dac))
+        is_adjacent_tope <- all(xc == sign(q)) || !is.null(solveLP_fun(xc, dac, LP_output$lp_object_pointer)$solution)
 
         if (is_adjacent_tope) {
           x <- decondense(xc, cond)
@@ -530,7 +532,7 @@ mLR <- function(
   }
 
   # calculate regression weights and calculate linear estimates
-  x <- if (qr(da)$rank > 0) solveLP_fun(soltope, da) else rep(0, ncol(a))
+  x <- if (qr(da)$rank > 0) solveLP_fun(soltope, da, LP_output$lp_object_pointer)$solution else rep(0, ncol(a))
   xp <- if (!is.null(x)) as.vector(a %*% x) else NULL
 
   list(
@@ -997,36 +999,46 @@ solveLP <- function(y = NULL, a = NULL) {
   return(x)
 }
 
-solveLP_col <- function(y = NULL, a = NULL) {
+solveLP_col <- function(y = NULL, a = NULL, lp_object_pointer) {
   # determines if sign(y) is a covector of matrix a
   # solves LP problem
   # if no solution then returns NULL
+  # if lp_object_pointer is given, skip building a model and just specify the new constraints
 
   n <- nrow(a)
   m <- ncol(a)
   sign_y <- sign(y)
-  lprec <- lpSolveAPI::make.lp(n, m)
-
-  for (i in seq.int(m)) {
-    lpSolveAPI::set.column(lprec, i, a[, i])
+  
+  if (missing(lp_object_pointer)) {
+    lprec <- lpSolveAPI::make.lp(n, m)
+    
+    for (i in seq.int(m)) {
+      lpSolveAPI::set.column(lprec, i, a[, i])
+    }
+    
+    lpSolveAPI::set.objfn(lprec, rep(0, m)) 
+    
+    lpSolveAPI::set.bounds(
+      lprec,
+      lower = rep(-Inf, m),
+      upper = rep(Inf, m),
+      columns = 1:m
+    )
+  } else {
+    lprec <- lp_object_pointer
   }
 
-  lpSolveAPI::set.objfn(lprec, rep(0, m))
   constraint_types <- c("<=", "=", ">=")[sign_y + 2L]
   lpSolveAPI::set.constr.type(lprec, constraint_types)
   lpSolveAPI::set.rhs(lprec, sign_y)
 
-  lpSolveAPI::set.bounds(
-    lprec,
-    lower = rep(-Inf, m),
-    upper = rep(Inf, m),
-    columns = 1:m
-  )
   solve(lprec) 
   if (lpSolveAPI::get.solutioncount(lprec) == 0) {
-    return(NULL)
+    solution <- NULL
+  } else {
+    solution <- lpSolveAPI::get.variables(lprec)
   }
-  lpSolveAPI::get.variables(lprec)
+  list(solution = solution, lp_object_pointer = lprec)
 }
 
 tope2perm <- function(x = NULL, d = NULL) {
