@@ -12,17 +12,15 @@ y3 <- readexp(3, "data/dunn2025/")
 # toy <- y1$total[c(3, 6), c(3, 5, 6)]
 # out <- fitSR(list(toy))
 # str(out,1)
+#
+# o1 <- fitSR(list(y1$total))
+# o2 <- fitSR(list(y1$total, y2$total))
+# o3 <- fitSR(list(y1$total, y2$total, y3$total))
+#
+#
+# o1a <- fitSR(list(y1$total), lp_solver = "highs")
+# o2a <- fitSR(list(y1$total, y2$total), lp_solver = "highs")
+# o3a <- fitSR(list(y1$total, y2$total, y3$total), lp_solver = "highs")
 
-o1 <- fitSR(list(y1$total))
-o2 <- fitSR(list(y1$total, y2$total))
-o3 <- fitSR(list(y1$total, y2$total, y3$total))
 
-
-o1a <- fitSR(list(y1$total), lp_solver = "highs")
-o2a <- fitSR(list(y1$total, y2$total), lp_solver = "highs")
-o3a <- fitSR(list(y1$total, y2$total, y3$total), lp_solver = "highs")
-
-# #
-# profvis({
-#   out <- fitSR(list(y1$total, y2$total), nstep = 20)
-# })
+o3a <- fitSR(list(y1$total, y2$total, y3$total), lp_solver = "highs", nstep = 1000)

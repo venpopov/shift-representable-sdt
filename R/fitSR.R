@@ -6,7 +6,8 @@ fitSR <- function(
   nstep = 20,
   init = NULL,
   input = NULL,
-  lp_solver = "lpSolveAPI"
+  lp_solver = "highs",
+  control = NULL
 ) {
   # takes as input a nr x nc matrix of counts
   # columns correspond to rating categories with confidence that the item is old decreasing from left to right
@@ -45,7 +46,8 @@ fitSR <- function(
     weights = weights,
     input = input,
     nstep = nstep,
-    lp_solver = lp_solver
+    lp_solver = lp_solver,
+    control = control
   )
 
   if (length(y) == 1) {
@@ -310,7 +312,8 @@ mLR <- function(
   init = NULL,
   tol = 1e-5,
   input = NULL,
-  lp_solver = "lpSolveAPI"
+  lp_solver = "lpSolveAPI",
+  control = NULL
 ) {
   # solves the monotonic Linear Regression problem
   # data is a n-vector of observations
@@ -371,6 +374,7 @@ mLR <- function(
     lpSolveAPI = make_solveLP_lpSolveAPI,
     highs = make_solveLP_highs
   )
+  control <- control %||% highs::highs_control()
 
   # deal with some special cases
   r <- qr(da)$rank
@@ -395,7 +399,7 @@ mLR <- function(
       soltope <- -t
       pred <- mr2$pred
     }
-  } else if (!is.null(make_solveLP(da)(dy))) {
+  } else if (!is.null(make_solveLP(da, control = control)(dy))) {
     type <- "Data conform to permitted permutation"
     soltope <- sign(dy)
     minfit <- 0
@@ -406,7 +410,7 @@ mLR <- function(
     cond <- condense(a)
     dac <- mat2diff(cond$matrix, 1) # difference matrix of condensation of a
     dc <- mat2diff(diag(nrow(cond$matrix))) # difference matrix of order nrow(ac)
-    solveLP_fun <- make_solveLP(dac)
+    solveLP_fun <- make_solveLP(dac, control = control)
 
     parallel <- parallel %||% parallelclass(dac)
     rankdc <- sapply(parallel, function(x) qr(dc[x, ])$rank) # store dc sub-matrix ranks
@@ -968,7 +972,7 @@ make_solveLP_lpSolveAPI <- function(a, ...) {
   }
 }
 
-make_solveLP_highs <- function(a, ..., control = highs::highs_control(log_to_console = FALSE)) {
+make_solveLP_highs <- function(a, ..., control = highs::highs_control()) {
   # this is a function factory. Given a matrix a, it generates a highs object
   # and outputs a new function which accepts a vector of lhs constraints
   # and applies them to the memoized highs object
@@ -996,8 +1000,8 @@ make_solveLP_highs <- function(a, ..., control = highs::highs_control(log_to_con
     rhs[rhs == 1L] <- Inf
 
     solver$cbounds(i = ipx, lhs = lhs, rhs = rhs)
-
-    solver$solve()
+    # solver$solve()
+    highs::hi_solver_run(solver$solver)
     msg <- solver$status_message()
     if (!is.null(msg) && grepl("infeas", msg, ignore.case = TRUE)) {
       return(NULL)
