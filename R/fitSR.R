@@ -6,8 +6,7 @@ fitSR <- function(
   nstep = 20,
   init = NULL,
   input = NULL,
-  lp_solver = "highs",
-  control = NULL
+  lp_solver = "highs"
 ) {
   # takes as input a nr x nc matrix of counts
   # columns correspond to rating categories with confidence that the item is old decreasing from left to right
@@ -15,7 +14,6 @@ fitSR <- function(
   # although there are options to change them, usually the call will be:
   # out <- fitSR (y), where y is the data matrix or a list of matrices in which case a joint analysis is performed
   # lp_solver: one of "lpSolveAPI" or "highs". "highs" can significantly speed up the procedure
-  # for larger problems, but is less efficient for smaller problems
 
   weights <- NULL
   y <- data
@@ -46,8 +44,7 @@ fitSR <- function(
     weights = weights,
     input = input,
     nstep = nstep,
-    lp_solver = lp_solver,
-    control = control
+    lp_solver = lp_solver
   )
 
   if (length(y) == 1) {
@@ -312,8 +309,7 @@ mLR <- function(
   init = NULL,
   tol = 1e-5,
   input = NULL,
-  lp_solver = "lpSolveAPI",
-  control = NULL
+  lp_solver = "highs"
 ) {
   # solves the monotonic Linear Regression problem
   # data is a n-vector of observations
@@ -325,7 +321,6 @@ mLR <- function(
   # init is optional initial permutation to initiate search
   # tol is tolerance (absolute values less than tol set to zero)
   # lp_solver: one of "lpSolveAPI" or "highs". "highs" can significantly speed up the procedure
-  # for larger problems, but is less efficient for smaller problems
   # input is optional output from a previous call to mLR (allows solution to proceed in stages)
   # returns: optimal fit, fitted values (predictions), and best-fitting permutation,
   # and vectors of fits and best fits for each step
@@ -374,7 +369,6 @@ mLR <- function(
     lpSolveAPI = make_solveLP_lpSolveAPI,
     highs = make_solveLP_highs
   )
-  control <- control %||% highs::highs_control()
 
   # deal with some special cases
   r <- qr(da)$rank
@@ -399,7 +393,7 @@ mLR <- function(
       soltope <- -t
       pred <- mr2$pred
     }
-  } else if (!is.null(make_solveLP(da, control = control)(dy))) {
+  } else if (!is.null(make_solveLP(da)(dy))) {
     type <- "Data conform to permitted permutation"
     soltope <- sign(dy)
     minfit <- 0
@@ -410,7 +404,7 @@ mLR <- function(
     cond <- condense(a)
     dac <- mat2diff(cond$matrix, 1) # difference matrix of condensation of a
     dc <- mat2diff(diag(nrow(cond$matrix))) # difference matrix of order nrow(ac)
-    solveLP_fun <- make_solveLP(dac, control = control)
+    solveLP_fun <- make_solveLP(dac, control = highs::highs_control(presolve = "off"))
 
     parallel <- parallel %||% parallelclass(dac)
     rankdc <- sapply(parallel, function(x) qr(dc[x, ])$rank) # store dc sub-matrix ranks
@@ -466,17 +460,18 @@ mLR <- function(
       itr <- itr + 1 # increment step count
       tc <- sign(mat2diff(open[[1]]$perm))
       f <- open[[1]]$fit
-      yp <- open[[1]]$pred # retrieve values from open
-      open <- open[-1] # remove first element from open
+
 
       # update if improved fit
       if (f < minfit) {
         minfit <- f
+        best_sol <- open[[1]]$sol
         soltope <- decondense(tc, cond)
-        pred <- yp
+        pred <- open[[1]]$pred
       }
       fits <- c(fits, f)
       minfits <- c(minfits, minfit)
+      open <- open[-1] # remove first element from open
 
       # find adjacent topes
       ds <- abs(dc %*% t(dc) %*% tc) / 2 # indicator of adjacent topes in dc
@@ -972,7 +967,7 @@ make_solveLP_lpSolveAPI <- function(a, ...) {
   }
 }
 
-make_solveLP_highs <- function(a, ..., control = highs::highs_control()) {
+make_solveLP_highs <- function(a, ..., control = highs::highs_control(presolve = "off")) {
   # this is a function factory. Given a matrix a, it generates a highs object
   # and outputs a new function which accepts a vector of lhs constraints
   # and applies them to the memoized highs object
@@ -1000,7 +995,6 @@ make_solveLP_highs <- function(a, ..., control = highs::highs_control()) {
     rhs[rhs == 1L] <- Inf
 
     solver$cbounds(i = ipx, lhs = lhs, rhs = rhs)
-    # solver$solve()
     highs::hi_solver_run(solver$solver)
     msg <- solver$status_message()
     if (!is.null(msg) && grepl("infeas", msg, ignore.case = TRUE)) {
