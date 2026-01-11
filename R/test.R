@@ -72,10 +72,10 @@ fitSR(list(y1$total, y2$total, y3$total))
 # o4_3a = fitSR(list(y1$total, y2$total, y3$total), solveLP_fun = solveLP_col, simplematrix_fun = simplematrix_fast, nstep=100)
 
 
-# # 
-# profvis({
-#   out = fitSR(list(y1$total, y2$total, y3$total), solveLP_fun = solveLP_col, simplematrix_fun = simplematrix_fast, nstep=10)
-# })
+#
+profvis({
+  out = fitSR(list(y1$total, y2$total), nstep = 20)
+})
 
 
 # profvis({

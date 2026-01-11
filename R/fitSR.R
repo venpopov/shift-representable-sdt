@@ -411,7 +411,9 @@ mLR <- function(
     dyp <- mat2diff(init[cond$id])
     init <- as.vector(sign(dyp))
 
+    # solveLP_fun <- make_solveLP_highs(dac)
     LP_output <- solveLP_fun(init, dac)
+    
     
     # repair initial vector if not tope or not feasible
     if (any(init == 0) || is.null(LP_output$solution)) {
@@ -1033,8 +1035,46 @@ solveLP_col <- function(y = NULL, a = NULL, lp_object_pointer = NULL) {
     solution <- NULL
   } else {
     solution <- lpSolveAPI::get.variables(lprec)
+    # saveRDS(list(y = y, a = a), "output/bigmat_lp.RDS")
   }
   list(solution = solution, lp_object_pointer = lprec)
+}
+
+make_solveLP_highs <- function(a, ..., control = highs::highs_control(log_to_console = FALSE)) {
+  n <- nrow(a)
+  m <- ncol(a)
+  
+  model <- highs::highs_model(
+    L     = rep(0, m),
+    lower = rep(-Inf, m),
+    upper = rep( Inf, m),
+    A     = a,
+    lhs   = rep(-Inf, n),
+    rhs   = rep( Inf, n),
+    maximum = FALSE
+  )
+  
+  ipx <- seq_len(n)
+  solver <- highs::highs_solver(model, control = control)  # hot-start capable  [oai_citation:4‡CRAN](https://cran.r-project.org/web/packages/highs/highs.pdf)
+  
+  function(y, ...) {
+    lhs <- rhs <- sign(y)
+    lhs[lhs == -1L] <- -Inf
+    rhs[rhs == 1L] <- Inf
+    
+    # Update all constraint bounds in one call (cbounds(i, lhs, rhs)).  [oai_citation:5‡CRAN](https://cran.r-project.org/web/packages/highs/highs.pdf)
+    solver$cbounds(i = ipx, lhs = lhs, rhs = rhs)
+    
+    solver$solve()
+    msg <- solver$status_message()
+    if (!is.null(msg) && grepl("infeas", msg, ignore.case = TRUE)) return(NULL)
+    
+    sol <- solver$solution()
+    if (is.list(sol)) return(list(solution = sol[["col_value"]]))
+    if (is.numeric(sol)) return(list(solution = sol))
+    
+    NULL
+  }
 }
 
 tope2perm <- function(x = NULL, d = NULL) {
