@@ -6,14 +6,15 @@ fitSR <- function(
   nstep = 20,
   init = NULL,
   input = NULL,
-  solveLP_fun = solveLP_col,
-  simplematrix_fun = simplematrix_fast
+  lp_solver = "lpSolveAPI"
 ) {
   # takes as input a nr x nc matrix of counts
   # columns correspond to rating categories with confidence that the item is old decreasing from left to right
   # rows correspond to conditions
   # although there are options to change them, usually the call will be:
   # out <- fitSR (y), where y is the data matrix or a list of matrices in which case a joint analysis is performed
+  # lp_solver: one of "lpSolveAPI" or "highs". "highs" can significantly speed up the procedure
+  # for larger problems, but is less efficient for smaller problems
 
   weights <- NULL
   y <- data
@@ -44,8 +45,7 @@ fitSR <- function(
     weights = weights,
     input = input,
     nstep = nstep,
-    solveLP_fun = solveLP_fun,
-    simplematrix_fun = simplematrix_fun
+    lp_solver = lp_solver
   )
 
   if (length(y) == 1) {
@@ -310,8 +310,7 @@ mLR <- function(
   init = NULL,
   tol = 1e-5,
   input = NULL,
-  solveLP_fun = solveLP_col,
-  simplematrix_fun = simplematrix_fast
+  lp_solver = "lpSolveAPI"
 ) {
   # solves the monotonic Linear Regression problem
   # data is a n-vector of observations
@@ -322,6 +321,8 @@ mLR <- function(
   # parallel islist of parallelism classes of the difference matrix of design (calculated if NULL)
   # init is optional initial permutation to initiate search
   # tol is tolerance (absolute values less than tol set to zero)
+  # lp_solver: one of "lpSolveAPI" or "highs". "highs" can significantly speed up the procedure
+  # for larger problems, but is less efficient for smaller problems
   # input is optional output from a previous call to mLR (allows solution to proceed in stages)
   # returns: optimal fit, fitted values (predictions), and best-fitting permutation,
   # and vectors of fits and best fits for each step
@@ -340,7 +341,7 @@ mLR <- function(
       y <- as.vector(y)
     }
     n <- length(y)
-    w <- weights %||% diag(rep(1, n))
+    w <- weights %||% diag(n)
     a <- design %||% matrix(rep(1, n), n, 1) # default intercept model
 
     if (is.data.frame(w)) {
@@ -362,9 +363,14 @@ mLR <- function(
   fits <- c()
   minfits <- c() # initialize arrays to contain current fit and best fit on each step
   if (is.vector(a)) a <- as.matrix(a)
-  da <- mat2diff(a, 1) # difference matrix of a# re-order open by fit# re-order open by fit
+  da <- mat2diff(a, 1) # difference matrix of a
   dy <- mat2diff(y) # difference vector of y
   d <- mat2diff(diag(nrow(a))) # difference matrix
+
+  make_solveLP <- switch(lp_solver,
+    lpSolveAPI = make_solveLP_lpSolveAPI,
+    highs = make_solveLP_highs
+  )
 
   # deal with some special cases
   r <- qr(da)$rank
@@ -389,7 +395,7 @@ mLR <- function(
       soltope <- -t
       pred <- mr2$pred
     }
-  } else if (!is.null(solveLP_fun(dy, da))) {
+  } else if (!is.null(make_solveLP(da)(dy))) {
     type <- "Data conform to permitted permutation"
     soltope <- sign(dy)
     minfit <- 0
@@ -400,8 +406,9 @@ mLR <- function(
     cond <- condense(a)
     dac <- mat2diff(cond$matrix, 1) # difference matrix of condensation of a
     dc <- mat2diff(diag(nrow(cond$matrix))) # difference matrix of order nrow(ac)
+    solveLP_fun <- make_solveLP(dac)
 
-    parallel <- parallel %||% parallelclass(dac, simplematrix_fun)
+    parallel <- parallel %||% parallelclass(dac)
     rankdc <- sapply(parallel, function(x) qr(dc[x, ])$rank) # store dc sub-matrix ranks
     u <- a %*% MASS::ginv(t(a) %*% w %*% a) %*% t(a) %*% w # calculate useful matrix (???)
 
@@ -411,7 +418,7 @@ mLR <- function(
     init <- as.vector(sign(dyp))
 
     # repair initial vector if not tope or not feasible
-    if (any(init == 0) || is.null(solveLP_fun(init, dac))) {
+    if (any(init == 0) || is.null(solveLP_fun(init))) {
       md <- mean(abs(dyp))
       my <- y + .1 * runif(length(y), -md, md) # add some random jitter to y
       yp <- u %*% my # weighted projection of my onto col(a)
@@ -420,7 +427,7 @@ mLR <- function(
     }
 
     # warn if initial tope is not in permitted set
-    if (is.null(solveLP_fun(init, dac))) {
+    if (is.null(solveLP_fun(init))) {
       warning("Initial tope not in permitted set")
     }
 
@@ -435,8 +442,9 @@ mLR <- function(
     t2perm_d <- mat2diff(diag(t2p_n))
     ptc <- tope2perm(tc, d = t2perm_d) # convert to permutation
 
-    open <- list(list("fit" = mr$fit, "pred" = mr$pred, "perm" = ptc)) # initialize open list
-    closed <- new.env(hash = TRUE, parent = emptyenv(), size = 2000L) # store visited permutations to avoid checking
+    # store visited permutations to avoid checking
+    open <- list(list("fit" = mr$fit, "pred" = mr$pred, "perm" = ptc))
+    closed <- new.env(hash = TRUE, parent = emptyenv(), size = 2000L)
 
     # initialize optimal fit and solution tope
     if (is.null(input)) {
@@ -472,12 +480,9 @@ mLR <- function(
       # precompute q values
       q_base <- as.vector(t(tc) %*% H)
 
-      for (i in 1:length(parallel)) {
-        s <- parallel[[i]]
-        if (sum(ds[s] == 1) != rankdc[i]) {
-          next
-        }
+      is_adjacent <- sapply(parallel, function(s) sum(ds[s] == 1)) == rankdc
 
+      for (s in parallel[is_adjacent]) {
         # parallelism class defines a face of the cone of tc in col(d)
         xc <- tc
         xc[s] <- -xc[s] # create candidate adjacent tope
@@ -490,27 +495,25 @@ mLR <- function(
         }
         closed[[permutation_key]] <- TRUE
 
+        # adjust q values for new tope
         q_diff <- t(xc[s]) %*% H[s, ]
         q <- as.vector(q_base + 2 * q_diff)
-        q[abs(q) < tol] <- 0 # projection test
+        q[abs(q) < tol] <- 0
 
         # solve the LP problem
-        is_adjacent_tope <- all(xc == sign(q)) || !is.null(solveLP_fun(xc, dac))
+        is_tope_feasible <- all(xc == sign(q)) || !is.null(solveLP_fun(xc))
 
-        if (is_adjacent_tope) {
+        if (is_tope_feasible) {
           x <- decondense(xc, cond)
           mr <- lsqisotonic1(y, w, x, d = d) # calculate fit
-          open <- c(
-            open,
-            list(list(fit = mr$fit, pred = mr$pred, perm = pxc))
-          )
+          candidate <- list(fit = mr$fit, pred = mr$pred, perm = pxc)
+          open <- c(open, list(candidate))
         }
       }
 
       if (length(open) > 0) {
-        # re-order open by fit
-        f <- sapply(open, function(x) x[[1]])
-        open <- open[order(f)]
+        open_fits <- sapply(open, function(x) x$fit)
+        open <- open[order(open_fits)]
       }
     }
   }
@@ -530,7 +533,7 @@ mLR <- function(
   }
 
   # calculate regression weights and calculate linear estimates
-  x <- if (qr(da)$rank > 0) solveLP_fun(soltope, da) else rep(0, ncol(a))
+  x <- if (qr(da)$rank > 0) make_solveLP(da)(soltope) else rep(0, ncol(a))
   xp <- if (!is.null(x)) as.vector(a %*% x) else NULL
 
   list(
@@ -783,9 +786,9 @@ d2t <- function(x = NULL, n = NULL) {
   return(y)
 }
 
-parallelclass <- function(a, simplematrix_fun = simplematrix_fast) {
+parallelclass <- function(a) {
   # returns list of parallel classes of matrix a
-  out <- simplematrix_fun(a)
+  out <- simplematrix(a)
   p <- list()
   for (i in 1:length(out$id)) {
     p <- append(p, list(which(out$index == out$id[i])))
@@ -794,37 +797,6 @@ parallelclass <- function(a, simplematrix_fun = simplematrix_fast) {
 }
 
 simplematrix <- function(a) {
-  # simplifies matrix a by removing null and parallel rows
-  # s is the simple matrix
-  # ia is a list of numbers of rows of a included in s
-  # ic is a list of numbers of rows of s corresponding to each row of a
-  # if any ic==0 then the corresponding row of a is null
-  #
-  ia <- matrix()
-  ia <- ia[-1]
-  ic <- rep(0, nrow(a))
-  j <- apply(a != 0, 1, sum)
-  ic[j == 0] <- -1
-  # find parallel rows
-  for (i in 1:nrow(a)) {
-    if (ic[i] == 0) {
-      ic[i] <- i
-      ia <- c(ia, i)
-      if (i < nrow(a)) {
-        for (j in (i + 1):nrow(a)) {
-          if (qr(a[c(i, j), ])$rank == 1 && ic[j] == 0) {
-            ic[j] <- i
-          }
-        }
-      }
-    }
-  }
-  s <- a[ia, ]
-  ic[ic < 0] <- 0
-  list("matrix" = s, "id" = ia, "index" = ic)
-}
-
-simplematrix_fast <- function(a) {
   n <- nrow(a)
   if (is.null(n) || n == 0L) {
     return(list(
@@ -839,13 +811,11 @@ simplematrix_fast <- function(a) {
     if (all(is.finite(a)) && all(a == round(a))) {
       storage.mode(a) <- "integer"
     } else {
-      stop(
-        "simplematrix_fast: to guarantee identical output, a must be integer (or numeric with all whole numbers)."
-      )
+      stop("a must be integer.")
     }
   }
 
-  # Zero-row detection (faster than apply)
+  # Zero-row detection
   nnz <- rowSums(a != 0L)
   nonzero <- which(nnz != 0L)
 
@@ -942,7 +912,7 @@ decondense <- function(x = NULL, cond = NULL) {
   # cond is output from condense(a) where a is the design matrix
   if (is.null(x)) {
     stop("Error: Tope not specified.")
-  } 
+  }
   ic <- cond$index
   u <- unique(ic)
   if (length(ic) > length(u)) {
@@ -959,52 +929,15 @@ decondense <- function(x = NULL, cond = NULL) {
   as.vector(y)
 }
 
-solveLP <- function(y = NULL, a = NULL) {
-  # determines if sign(y) is a covector of matrix a
-  # solves LP problem
-  # if no solution then returns NULL
+make_solveLP_lpSolveAPI <- function(a, ...) {
+  # this is a function factory. Given a matrix a, it generates a lpSolve object
+  # and outputs a new function which accepts a vector of lhs constraints
+  # and applies them to the memoized lpSolve object
+  # This procedure reuses the same lpSolve object, which speeds up the model
+  # construction as long as the matrix a doesn't change
   n <- nrow(a)
   m <- ncol(a)
-  lprec <- lpSolveAPI::make.lp(n, m)
-  lpSolveAPI::set.objfn(lprec, rep(0, m))
-  C <- a
-  for (i in 1:nrow(C)) {
-    vec = C[i, ]
-    if (y[i] > 0) {
-      lpSolveAPI::add.constraint(lprec, vec, ">=", 1)
-    } else if (y[i] < 0) {
-      lpSolveAPI::add.constraint(lprec, vec, "<=", -1)
-    } else {
-      lpSolveAPI::add.constraint(lprec, vec, "=", 0)
-    }
-  }
-  lpSolveAPI::set.bounds(
-    lprec,
-    lower = rep(-Inf, m),
-    upper = rep(Inf, m),
-    columns = 1:m
-  )
-  solve(lprec)
-  exitflag <- 1
-  if (lpSolveAPI::get.solutioncount(lprec) == 0) {
-    exitflag <- 0
-  }
-  if (exitflag == 1) {
-    x <- lpSolveAPI::get.variables(lprec)
-  } else {
-    x <- NULL
-  }
-  return(x)
-}
 
-solveLP_col <- function(y = NULL, a = NULL) {
-  # determines if sign(y) is a covector of matrix a
-  # solves LP problem
-  # if no solution then returns NULL
-
-  n <- nrow(a)
-  m <- ncol(a)
-  sign_y <- sign(y)
   lprec <- lpSolveAPI::make.lp(n, m)
 
   for (i in seq.int(m)) {
@@ -1012,9 +945,6 @@ solveLP_col <- function(y = NULL, a = NULL) {
   }
 
   lpSolveAPI::set.objfn(lprec, rep(0, m))
-  constraint_types <- c("<=", "=", ">=")[sign_y + 2L]
-  lpSolveAPI::set.constr.type(lprec, constraint_types)
-  lpSolveAPI::set.rhs(lprec, sign_y)
 
   lpSolveAPI::set.bounds(
     lprec,
@@ -1022,11 +952,67 @@ solveLP_col <- function(y = NULL, a = NULL) {
     upper = rep(Inf, m),
     columns = 1:m
   )
-  solve(lprec) 
-  if (lpSolveAPI::get.solutioncount(lprec) == 0) {
-    return(NULL)
+
+  function(y, ...) {
+    sign_y <- sign(y)
+    constraint_types <- c("<=", "=", ">=")[sign_y + 2L]
+    lpSolveAPI::set.constr.type(lprec, constraint_types)
+    lpSolveAPI::set.rhs(lprec, sign_y)
+
+    solve(lprec)
+    if (lpSolveAPI::get.solutioncount(lprec) == 0) {
+      return(NULL)
+    } else {
+      return(lpSolveAPI::get.variables(lprec))
+    }
   }
-  lpSolveAPI::get.variables(lprec)
+}
+
+make_solveLP_highs <- function(a, ..., control = highs::highs_control(log_to_console = FALSE)) {
+  # this is a function factory. Given a matrix a, it generates a highs object
+  # and outputs a new function which accepts a vector of lhs constraints
+  # and applies them to the memoized highs object
+  # This procedure reuses the same highs object, which speeds up the model
+  # construction as long as the matrix a doesn't change
+  n <- nrow(a)
+  m <- ncol(a)
+
+  model <- highs::highs_model(
+    L = rep(0, m),
+    lower = rep(-Inf, m),
+    upper = rep(Inf, m),
+    A = a,
+    lhs = rep(-Inf, n),
+    rhs = rep(Inf, n),
+    maximum = FALSE
+  )
+
+  ipx <- seq_len(n)
+  solver <- highs::highs_solver(model, control = control)
+
+  function(y, ...) {
+    lhs <- rhs <- sign(y)
+    lhs[lhs == -1L] <- -Inf
+    rhs[rhs == 1L] <- Inf
+
+    solver$cbounds(i = ipx, lhs = lhs, rhs = rhs)
+
+    solver$solve()
+    msg <- solver$status_message()
+    if (!is.null(msg) && grepl("infeas", msg, ignore.case = TRUE)) {
+      return(NULL)
+    }
+
+    sol <- solver$solution()
+    if (is.list(sol)) {
+      return(sol[["col_value"]])
+    }
+    if (is.numeric(sol)) {
+      return(sol)
+    }
+
+    NULL
+  }
 }
 
 tope2perm <- function(x = NULL, d = NULL) {

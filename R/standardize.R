@@ -15,9 +15,9 @@ standardize <- function(standard, target, joint) {
   zs <- joint$z[1:ns] * b[2] + b[1]
   zt <- joint$z[(ns + 1):(ns + nt)] * b[2] + b[1]
   a <- standard$design
-  xs <- ginv(t(a) %*% a) %*% t(a) %*% zs
+  xs <- MASS::ginv(t(a) %*% a) %*% t(a) %*% zs
   a <- target$design
-  xt <- ginv(t(a) %*% a) %*% t(a) %*% zt
+  xt <- MASS::ginv(t(a) %*% a) %*% t(a) %*% zt
   output$zs <- zs
   output$zt <- zt
   output$xs <- xs
