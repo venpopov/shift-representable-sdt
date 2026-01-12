@@ -28,10 +28,3 @@ o3b <- fitSR(list(y1$total, y2$total, y3$total), lp_solver = "lpSolveAPI", nstep
 
 str(o3a, 1)
 str(o3b, 1)
-
-
-plot(o3a$z, o3a$data)
-plot(o3b$z, o3b$data)
-plot(o3a$z, o3b$z)
-
-plot(o3a$data, o3a$predicted)

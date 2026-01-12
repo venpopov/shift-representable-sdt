@@ -967,11 +967,7 @@ make_solveLP_lpSolveAPI <- function(a, ...) {
   }
 }
 
-make_solveLP_highs <- function(a, ..., control = highs::highs_control(
-                                 presolve = "off",
-                                 solver = "simplex",
-                                 simplex_scale_strategy = 0
-                               )) {
+make_solveLP_highs <- function(a, ..., control = highs::highs_control()) {
   # this is a function factory. Given a matrix a, it generates a highs object
   # and outputs a new function which accepts a vector of lhs constraints
   # and applies them to the memoized highs object
@@ -999,20 +995,10 @@ make_solveLP_highs <- function(a, ..., control = highs::highs_control(
     rhs[rhs == 1L] <- Inf
 
     solver$cbounds(i = ipx, lhs = lhs, rhs = rhs)
-    # highs::hi_solver_clear_solver(solver$solver)
     highs::hi_solver_run(solver$solver)
-    msg <- solver$status_message()
-    status <- solver$info()$primal_solution_status
-    if (!is.null(msg) && grepl("infeas", msg, ignore.case = TRUE) || grepl("infeas", status, ignore.case = TRUE)) {
-      return(NULL)
-    }
 
-    sol <- solver$solution()
-    if (is.list(sol)) {
-      return(sol[["col_value"]])
-    }
-    if (is.numeric(sol)) {
-      return(sol)
+    if (solver$info()$primal_solution_status == "Feasible") {
+      return(solver$solution()[["col_value"]])
     }
 
     NULL
