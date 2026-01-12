@@ -999,9 +999,11 @@ make_solveLP_highs <- function(a, ..., control = highs::highs_control(
     rhs[rhs == 1L] <- Inf
 
     solver$cbounds(i = ipx, lhs = lhs, rhs = rhs)
+    # highs::hi_solver_clear_solver(solver$solver)
     highs::hi_solver_run(solver$solver)
     msg <- solver$status_message()
-    if (!is.null(msg) && grepl("infeas", msg, ignore.case = TRUE)) {
+    status <- solver$info()$primal_solution_status
+    if (!is.null(msg) && grepl("infeas", msg, ignore.case = TRUE) || grepl("infeas", status, ignore.case = TRUE)) {
       return(NULL)
     }
 

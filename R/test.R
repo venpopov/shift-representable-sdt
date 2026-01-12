@@ -33,3 +33,5 @@ str(o3b, 1)
 plot(o3a$z, o3a$data)
 plot(o3b$z, o3b$data)
 plot(o3a$z, o3b$z)
+
+plot(o3a$data, o3a$predicted)
