@@ -967,7 +967,11 @@ make_solveLP_lpSolveAPI <- function(a, ...) {
   }
 }
 
-make_solveLP_highs <- function(a, ..., control = highs::highs_control(presolve = "off")) {
+make_solveLP_highs <- function(a, ..., control = highs::highs_control(
+                                 presolve = "off",
+                                 solver = "simplex",
+                                 simplex_scale_strategy = 0
+                               )) {
   # this is a function factory. Given a matrix a, it generates a highs object
   # and outputs a new function which accepts a vector of lhs constraints
   # and applies them to the memoized highs object
