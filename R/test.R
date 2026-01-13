@@ -23,8 +23,9 @@ y3 <- readexp(3, "data/dunn2025/")
 # o3a <- fitSR(list(y1$total, y2$total, y3$total), lp_solver = "highs")
 
 
-o3a <- fitSR(list(y1$total, y2$total, y3$total), lp_solver = "highs", nstep = 100)
+o3a <- fitSR(list(y1$total, y2$total, y3$total), lp_solver = "highs", nstep = 10000)
 o3b <- fitSR(list(y1$total, y2$total, y3$total), lp_solver = "lpSolveAPI", nstep = 100)
 
 str(o3a, 1)
-str(o3b, 1)
+
+plot(o3a$z, o3a$data)
